@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Tauri generated and build artifacts
+src-tauri/gen/
+src-tauri/target/
+
+# Environment variables
+.env
+.env.*
+
+# Personal / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Hermes agent state
+.hermes/
+
+# Android signing keys
+*.jks
+*.keystore
+
+# UI References (local design files)
+ui-references/
+
+# Logs
+*.log
+npm-debug.log*

@@ -1,0 +1,94 @@
+//! MikroKas — Tauri Rust core
+//!
+//! Semua business logic dan akses SQLite berada di sisi Rust.
+//! Frontend React memanggil command melalui Tauri IPC.
+
+mod commands;
+mod db;
+mod logger;
+mod models;
+mod pdf_plugin;
+mod qris;
+
+use tauri::Manager;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(pdf_plugin::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            // Fallback jika app_data_dir gagal (misal Android environment blm siap)
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/mikrokas"));
+            logger::init_logger(app_dir.clone());
+            logger::log("APP: setup dimulai");
+            let conn = db::init_db(app_dir);
+            app.manage(db::DbState(std::sync::Mutex::new(conn)));
+            logger::log("APP: setup selesai");
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // Profil toko
+            commands::toko_cmd::get_toko,
+            commands::toko_cmd::save_toko,
+            // Kategori produk
+            commands::kategori_cmd::list_kategori,
+            commands::kategori_cmd::create_kategori,
+            commands::kategori_cmd::update_kategori,
+            commands::kategori_cmd::delete_kategori,
+            // Produk
+            commands::produk_cmd::list_produk,
+            commands::produk_cmd::get_produk,
+            commands::produk_cmd::create_produk,
+            commands::produk_cmd::update_produk,
+            commands::produk_cmd::delete_produk,
+            commands::produk_cmd::list_produk_low_stock,
+            // Penjualan / pembelian
+            commands::transaksi_cmd::buat_transaksi_penjualan,
+            commands::transaksi_cmd::buat_transaksi_pembelian,
+            commands::transaksi_cmd::list_transaksi,
+            commands::transaksi_cmd::list_laporan_produk_terjual,
+            commands::transaksi_cmd::get_transaksi_detail,
+            commands::transaksi_cmd::edit_transaksi_penjualan,
+            commands::transaksi_cmd::delete_transaksi_penjualan,
+            // Dashboard
+            commands::dashboard_cmd::get_ringkasan,
+            commands::dashboard_cmd::get_penjualan_harian,
+            commands::dashboard_cmd::get_produk_terlaris,
+            commands::dashboard_cmd::get_keuntungan_penjualan,
+            // Kas manual
+            commands::kas_cmd::list_kas,
+            commands::kas_cmd::create_kas,
+            commands::kas_cmd::delete_kas,
+            commands::kas_cmd::get_ringkasan_kas,
+            // QRIS dinamis
+            commands::qris_cmd::generate_qris_dinamis,
+            commands::qris_cmd::list_qris_log,
+            commands::qris_cmd::cek_status_qris,
+            commands::qris_cmd::konfirmasi_bayar_qris,
+            commands::qris_cmd::expire_qris,
+            // QRIS profile
+            commands::qris_profile_cmd::list_qris_profile,
+            commands::qris_profile_cmd::save_qris_profile,
+            commands::qris_profile_cmd::set_active_qris_profile,
+            commands::qris_profile_cmd::delete_qris_profile,
+            commands::qris_profile_cmd::get_active_qris_profile,
+            // QRIS utility
+            commands::qris_util_cmd::validate_qris_string,
+            commands::qris_util_cmd::parse_qris,
+            commands::qris_util_cmd::generate_qris_with_fee,
+            // File operations: simpan & buka file
+            commands::file_cmd::simpan_pdf,
+            // Debug log
+            commands::log_cmd::read_log,
+            commands::log_cmd::write_log,
+            commands::log_cmd::copy_log_to_downloads,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running MikroKas");
+}

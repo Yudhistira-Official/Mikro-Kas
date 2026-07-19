@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MikroKas — Pembukuan UMKM</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,0..1&display=swap" rel="stylesheet">
+    <script>
+    // ============================================================
+    // Error hook SUPER AWAL — inline sebelum script lain.
+    // Menangkap error module evaluation yang tidak bisa ditangkap
+    // oleh window.addEventListener("error") atau ErrorBoundary React.
+    // ============================================================
+    (function() {
+      try {
+        window.__HERMES_ERRORS__ = [];
+        var _origOnError = window.onerror;
+        window.onerror = function(msg, url, line, col, err) {
+          var e = (err ? err.message || err.toString() : msg) + " @ " + (url||'') + ":" + (line||'') + ":" + (col||'');
+          window.__HERMES_ERRORS__.push(e);
+          try {
+            var prior = JSON.parse(localStorage.getItem("hermes_bootstrap_err") || "[]");
+            prior.push({ msg: String(msg), url: url||'', line: line||0, col: col||0, stack: (err && err.stack) ? String(err.stack).slice(0,300) : '' });
+            localStorage.setItem("hermes_bootstrap_err", JSON.stringify(prior.slice(-5)));
+          } catch(e2) {}
+          if (typeof document !== 'undefined' && document.body) {
+            var d = document.createElement('div');
+            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;font:11px monospace;z-index:9999;padding:4px;word-break:break-all';
+            d.textContent = e.slice(0,300);
+            document.body.appendChild(d);
+          }
+          if (_origOnError) return _origOnError.apply(window, arguments);
+          return true;
+        };
+        window.addEventListener('unhandledrejection', function(e) {
+          var msg = (e.reason ? e.reason.message || e.reason.toString() : 'Promise rejected');
+          window.__HERMES_ERRORS__.push('PROMISE: ' + msg);
+          try {
+            var prior = JSON.parse(localStorage.getItem("hermes_bootstrap_err") || "[]");
+            prior.push({ msg: String(msg), stack: (e.reason && e.reason.stack) ? String(e.reason.stack).slice(0,300) : '' });
+            localStorage.setItem("hermes_bootstrap_err", JSON.stringify(prior.slice(-5)));
+          } catch(e2) {}
+        });
+      } catch(ex) {
+        try { localStorage.setItem('hermes_bootstrap_err', JSON.stringify([String(ex)])); } catch(e2) {}
+      }
+    })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
