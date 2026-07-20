@@ -90,36 +90,82 @@ pub fn backup_database(app: tauri::AppHandle, _state: State<DbState>) -> Result<
 }
 
 /// Backup database SQLite ke lokasi yang dipilih user dari dialog native.
-/// Validasi minimal: ekstensi .db dan parent folder sudah ada.
+/// Command lama dipertahankan untuk kompatibilitas desktop; Android lebih aman
+/// memakai `export_database_base64` + frontend `writeFile` karena dialog Android
+/// dapat mengembalikan content URI, bukan path filesystem biasa.
 #[tauri::command]
 pub fn backup_database_to(
     app: tauri::AppHandle,
     _state: State<DbState>,
     target_path: String,
 ) -> Result<String, String> {
+    crate::logger::log(&format!("BACKUP: backup_database_to dipanggil; target_len={}", target_path.len()));
     let mut target = std::path::PathBuf::from(target_path);
     if target.extension().and_then(|e| e.to_str()) != Some("db") {
         target.set_extension("db");
     }
     let parent = target.parent().ok_or("Lokasi backup tidak valid")?;
     if !parent.exists() {
+        crate::logger::log("BACKUP: backup_database_to gagal; parent folder tidak ditemukan");
         return Err("Folder tujuan backup tidak ditemukan".into());
     }
     copy_database_to(app, target)
 }
 
-/// Helper copy DB agar command cache lama dan dialog native berbagi logika.
-fn copy_database_to(app: tauri::AppHandle, target: std::path::PathBuf) -> Result<String, String> {
+/// Ekspor database SQLite sebagai base64 agar frontend bisa menulis ke hasil
+/// native save picker Android tanpa bergantung pada path filesystem.
+#[tauri::command]
+pub fn export_database_base64(app: tauri::AppHandle, _state: State<DbState>) -> Result<String, String> {
+    crate::logger::log("BACKUP: export_database_base64 dipanggil");
+    let db_path = database_path(&app)?;
+    let bytes = std::fs::read(&db_path).map_err(|e| format!("Gagal baca DB untuk backup: {e}"))?;
+    crate::logger::log(&format!("BACKUP: export_database_base64 sukses; bytes={}", bytes.len()));
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Restore database dari base64. Dipakai frontend setelah readFile() dari dialog
+/// native, sehingga content URI Android tidak pernah dibaca langsung oleh Rust.
+#[tauri::command]
+pub fn restore_database_base64(
+    app: tauri::AppHandle,
+    _state: State<DbState>,
+    db_base64: String,
+) -> Result<(), String> {
+    crate::logger::log(&format!("BACKUP: restore_database_base64 dipanggil; base64_len={}", db_base64.len()));
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(db_base64)
+        .map_err(|e| format!("File backup tidak valid: {e}"))?;
+    if bytes.len() < 16 || &bytes[..16] != b"SQLite format 3\0" {
+        crate::logger::log("BACKUP: restore_database_base64 gagal; header bukan SQLite");
+        return Err("File backup bukan database SQLite MikroKas".into());
+    }
     let app_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Gagal app data dir: {e}"))?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| format!("Gagal buat app dir: {e}"))?;
     let db_path = app_dir.join("mikrokas.db");
+    std::fs::write(&db_path, bytes).map_err(|e| format!("Gagal restore DB: {e}"))?;
+    crate::logger::log("BACKUP: restore_database_base64 sukses");
+    Ok(())
+}
+
+/// Helper copy DB agar command cache lama dan dialog native berbagi logika.
+fn copy_database_to(app: tauri::AppHandle, target: std::path::PathBuf) -> Result<String, String> {
+    let db_path = database_path(&app)?;
     if !db_path.exists() {
         return Err("Database belum ada".into());
     }
     std::fs::copy(&db_path, &target).map_err(|e| format!("Gagal backup DB: {e}"))?;
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Path file database SQLite saat ini.
+fn database_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|p| p.join("mikrokas.db"))
+        .map_err(|e| format!("Gagal app data dir: {e}"))
 }
 
 /// Restore database dari path file backup. App perlu direstart setelah restore.

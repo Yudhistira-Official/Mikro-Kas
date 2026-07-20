@@ -37,7 +37,12 @@ export default function Qris() {
   }, [selectedProfileId]);
 
   const loadHistory = useCallback(() => {
-    invoke("list_qris_log", { limit: 20 }).then(setHistory).catch(console.error);
+    // Riwayat QRIS hanya berlaku untuk hari ini. Saat hari berganti, backend
+    // menghapus log lama sebelum daftar terbaru dibaca.
+    invoke("prune_old_qris_logs")
+      .then(() => invoke("list_qris_log", { limit: 20 }))
+      .then(setHistory)
+      .catch(console.error);
   }, []);
 
   useEffect(() => {

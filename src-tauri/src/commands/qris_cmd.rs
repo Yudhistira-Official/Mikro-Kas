@@ -147,3 +147,17 @@ pub fn expire_qris(state: State<DbState>, qris_log_id: i64) -> Result<String, St
     .map_err(|e| e.to_string())?;
     Ok("expired".into())
 }
+
+/// Hapus semua riwayat QRIS yang sudah berbeda hari (bukan hari ini).
+/// Dipanggil tiap kali halaman QRIS dibuka agar riwayat selalu hanya hari ini.
+#[tauri::command]
+pub fn prune_old_qris_logs(state: State<DbState>) -> Result<usize, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let deleted = conn
+        .execute(
+            "DELETE FROM qris_log WHERE date(created_at) < date('now')",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(deleted)
+}

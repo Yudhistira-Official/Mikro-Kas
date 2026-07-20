@@ -19,7 +19,6 @@ export default function Keuangan() {
   const [total, setTotal] = useState({ pemasukan: 0, pengeluaran: 0 });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
-  const [view, setView] = useState(() => localStorage.getItem("keuanganView") || "card");
 
   const load = () => {
     const dari = new Date(); dari.setDate(1);
@@ -54,12 +53,6 @@ export default function Keuangan() {
     catch (e) { addToast(`Gagal: ${e}`, "error"); }
   };
 
-  const toggle = () => {
-    const next = view === "card" ? "list" : "card";
-    setView(next);
-    localStorage.setItem("keuanganView", next);
-  };
-
   const filtered = tab === "all" ? list : list.filter((item) => item.tipe === tab);
   const saldo = total.pemasukan - total.pengeluaran;
 
@@ -67,9 +60,6 @@ export default function Keuangan() {
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", position: "relative", minHeight: "60dvh" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="text-headline-md">Manajemen Keuangan</span>
-        <button className="btn-icon" onClick={toggle} title={view === "card" ? "Tampilan List" : "Tampilan Card"}>
-          <span className="material-symbols-outlined">{view === "card" ? "view_list" : "grid_view"}</span>
-        </button>
       </div>
 
       {/* Ringkasan */}
@@ -96,36 +86,7 @@ export default function Keuangan() {
       </div>
 
       {/* Daftar transaksi */}
-      {view === "card" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", paddingBottom: "80px" }}>
-          {filtered.map((item) => (
-            <div key={item.id} className="card" style={{ display: "flex", flexDirection: "column", justifyBetween: "space-between", padding: "0.75rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 6 }}>
-                <span className="text-headline-sm" style={{ fontSize: "14px" }}>{item.kategori}</span>
-                <span className="chip" style={{
-                  background: item.tipe === "pemasukan" ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
-                  color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)",
-                }}>
-                  {item.tipe === "pemasukan" ? "Pemasukan" : "Pengeluaran"}
-                </span>
-              </div>
-              <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginBottom: 8 }}>{item.tanggal.slice(0, 10)}</p>
-              {item.keterangan && <p className="text-body-md" style={{ fontStyle: "italic", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.keterangan}</p>}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto" }}>
-                <span className="text-headline-sm" style={{ color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)", fontSize: "15px" }}>
-                  {item.tipe === "pemasukan" ? "+" : "-"}{rupiah(item.jumlah)}
-                </span>
-                {item.tipe === "pengeluaran" && item.id > 0 && item.kategori !== "Retur Penjualan" && (
-                  <button type="button" className="btn-icon" onClick={() => hapus(item.id)}>
-                    <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "80px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "80px" }}>
           {filtered.map((item) => (
             <div key={item.id} className="card" style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.75rem" }}>
               <div style={{
@@ -154,7 +115,6 @@ export default function Keuangan() {
             </div>
           ))}
         </div>
-      )}
       {filtered.length === 0 && <p className="text-body-md" style={{ textAlign: "center", color: "var(--color-text-secondary)", padding: "2rem 0" }}>Belum ada catatan</p>}
 
       {/* FAB */}

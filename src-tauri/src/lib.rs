@@ -74,6 +74,7 @@ pub fn run() {
             commands::qris_cmd::cek_status_qris,
             commands::qris_cmd::konfirmasi_bayar_qris,
             commands::qris_cmd::expire_qris,
+            commands::qris_cmd::prune_old_qris_logs,
             // QRIS profile
             commands::qris_profile_cmd::list_qris_profile,
             commands::qris_profile_cmd::save_qris_profile,
@@ -120,7 +121,9 @@ pub fn run() {
             // Backup/Restore
             commands::file_cmd::backup_database,
             commands::file_cmd::backup_database_to,
+            commands::file_cmd::export_database_base64,
             commands::file_cmd::restore_database,
+            commands::file_cmd::restore_database_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MikroKas");

@@ -8,13 +8,14 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use tauri::State;
 
-/// Baris laporan PDF: agregasi produk terjual per tanggal dan metode pembayaran.
+/// Baris laporan PDF: agregasi produk terjual per metode pembayaran dalam periode.
+/// ponytail: modal dihitung dari harga_beli produk SAAT INI, bukan historical snapshot.
 #[derive(Debug, Serialize)]
 pub struct LaporanProdukRow {
-    pub tanggal: String,
     pub produk_nama: String,
     pub metode_bayar: String,
     pub total_qty: i64,
+    pub total_modal: i64,
     pub total_harga: i64,
 }
 
@@ -233,7 +234,7 @@ pub fn list_transaksi(
     Ok(result)
 }
 
-/// Ambil baris laporan PDF: produk diagregasi per tanggal + pembayaran, lalu diurutkan abjad.
+/// Ambil baris laporan PDF: produk diagregasi per nama produk + metode pembayaran.
 #[tauri::command]
 pub fn list_laporan_produk_terjual(
     state: State<DbState>,
@@ -243,31 +244,31 @@ pub fn list_laporan_produk_terjual(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let sampai_with_time = format!("{} 23:59:59", sampai);
 
-    // Query langsung ke SQLite menghindari banyak IPC detail transaksi saat cetak PDF.
+    // Query langsung ke SQLite; agregasi lintas tanggal dalam periode sesuai permintaan PDF.
     let mut stmt = conn
         .prepare(
             "SELECT
-                substr(t.tanggal, 1, 10) AS tanggal,
                 p.nama AS produk_nama,
                 t.metode_bayar AS metode_bayar,
                 COALESCE(SUM(ti.qty), 0) AS total_qty,
+                COALESCE(SUM(ti.qty * p.harga_beli), 0) AS total_modal,
                 COALESCE(SUM(ti.subtotal), 0) AS total_harga
              FROM transaksi_item ti
              JOIN transaksi t ON t.id = ti.transaksi_id
              JOIN produk p ON p.id = ti.produk_id
              WHERE t.tipe = 'penjualan' AND t.tanggal BETWEEN ?1 AND ?2
-             GROUP BY substr(t.tanggal, 1, 10), p.nama, t.metode_bayar
-             ORDER BY lower(p.nama) ASC, substr(t.tanggal, 1, 10) ASC, lower(t.metode_bayar) ASC",
+             GROUP BY p.nama, t.metode_bayar
+             ORDER BY lower(p.nama) ASC, lower(t.metode_bayar) ASC",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
         .query_map(params![dari, sampai_with_time], |row| {
             Ok(LaporanProdukRow {
-                tanggal: row.get(0)?,
-                produk_nama: row.get(1)?,
-                metode_bayar: row.get(2)?,
-                total_qty: row.get(3)?,
+                produk_nama: row.get(0)?,
+                metode_bayar: row.get(1)?,
+                total_qty: row.get(2)?,
+                total_modal: row.get(3)?,
                 total_harga: row.get(4)?,
             })
         })

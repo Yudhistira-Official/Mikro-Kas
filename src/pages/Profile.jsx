@@ -53,11 +53,11 @@ const iconWrap = {
   width: "40px",
   height: "40px",
   borderRadius: "10px",
-  background: "var(--color-primary-container)",
+  background: "#1a3757",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "var(--color-primary)",
+  color: "#ffffff",
 };
 
 // Kartu sekunder — lebih ringkas, ikon outline abu.
@@ -77,11 +77,11 @@ const secondaryIcon = {
   width: "32px",
   height: "32px",
   borderRadius: "8px",
-  background: "var(--color-surface-container-high)",
+  background: "#1a3757",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "var(--color-text-secondary)",
+  color: "#ffffff",
   flexShrink: 0,
 };
 
@@ -130,7 +130,7 @@ export default function Profile() {
 
       {/* Versi */}
       <p className="text-label-md" style={{ textAlign: "center", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-        MikroKas v1.0.0
+        MikroKas v2.0.0
       </p>
     </div>
   );

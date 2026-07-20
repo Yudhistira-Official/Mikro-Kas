@@ -171,28 +171,30 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-        {/* SVG Line Chart */}
-        <div style={{ width: "100%", height: "140px", background: "var(--color-surface-container-low)", borderRadius: "12px", marginTop: "12px", position: "relative", overflow: "hidden", border: "1px solid rgba(226,232,240,0.5)" }}>
-          {harian.length > 0 ? (
-            <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ width: "100%", height: "100%", color: "var(--color-primary)" }}>
-              <path d={chartPath.area} fill="currentColor" fillOpacity="0.08" />
-              <path d={chartPath.d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", background: "var(--color-surface)", padding: "4px 12px", borderRadius: "8px" }}>
-                Belum ada data penjualan
-              </p>
-            </div>
-          )}
-        </div>
+        {/* Grafik hanya untuk rentang > Hari Ini; satu hari lebih jelas lewat angka total. */}
+        {rangeIdx !== 0 && (
+          <div style={{ width: "100%", height: "140px", background: "var(--color-surface-container-low)", borderRadius: "12px", marginTop: "12px", position: "relative", overflow: "hidden", border: "1px solid rgba(226,232,240,0.5)" }}>
+            {harian.length > 0 ? (
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ width: "100%", height: "100%", color: "var(--color-primary)" }}>
+                <path d={chartPath.area} fill="currentColor" fillOpacity="0.08" />
+                <path d={chartPath.d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", background: "var(--color-surface)", padding: "4px 12px", borderRadius: "8px" }}>
+                  Belum ada data penjualan
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Quick Stats Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "var(--color-primary-container)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)" }}>
+            <div style={{ width: "32px", height: "32px", borderRadius: "10px", background: "#1a3757", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff" }}>
               <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>receipt_long</span>
             </div>
             <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-secondary)" }}>Transaksi</p>

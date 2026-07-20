@@ -1,35 +1,23 @@
 // ============================================================
-// LogoMark.jsx — Logo MikroKas kontras untuk header dan Profile.
+// LogoMark.jsx — Logo MikroKas dari Stitch (icon M geometric navy).
 //
-// Tujuan:
-//   - Menghindari ikon menyatu dengan background putih/abu.
-//   - Memakai blok navy solid + aksen cyan agar tetap terbaca di layar Android.
-//   - Tanpa asset gambar eksternal agar APK tetap ringan.
+// Asset publik: /logo-header.png — crop M-icon putih background.
+// Versi wordmark tidak dipakai lagi; header dan profile hanya tampil icon.
 // ============================================================
-export default function LogoMark({ size = 40 }) {
-  const fontSize = Math.max(12, Math.round(size * 0.36));
-
+export default function LogoMark({ size = 48 }) {
   return (
-    <span
-      aria-label="Logo MikroKas"
+    <img
+      src="/logo-header.png"
+      alt="MikroKas"
       style={{
         width: size,
         height: size,
-        borderRadius: Math.round(size * 0.28),
-        background: "linear-gradient(135deg, #082f49 0%, #1a365d 58%, #0f766e 100%)",
-        color: "#ffffff",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 800,
-        fontSize,
-        letterSpacing: "-0.04em",
-        boxShadow: "0 8px 18px rgba(8, 47, 73, 0.32), inset 0 0 0 1px rgba(255,255,255,0.18)",
-        border: "2px solid rgba(255,255,255,0.92)",
-        flexShrink: 0,
+        objectFit: "contain",
+        background: "#ffffff",
+        borderRadius: "12px",
+        padding: "2px",
+        boxSizing: "border-box",
       }}
-    >
-      MK
-    </span>
+    />
   );
 }
