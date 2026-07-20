@@ -1,71 +1,129 @@
 # MikroKas
 
-Aplikasi mobile pembukuan dan kasir (POS) sederhana untuk UMKM (warung, toko kelontong, pedagang kecil) berbasis **Tauri v2**, **React 19**, **Vite 7**, dan database lokal **SQLite (Offline-First)** yang dioptimalkan untuk perangkat mobile berspesifikasi rendah dengan penyimpanan dan RAM terbatas.
+MikroKas adalah aplikasi kasir, pembukuan, QRIS, dan laporan PDF untuk UMKM. Aplikasi berjalan offline-first memakai Tauri v2, React 19, Vite 7, Rust, dan SQLite lokal.
 
-Aplikasi ini menggabungkan pencatatan pembukuan sederhana dengan modul utilitas konversi **QRIS Statis** menjadi **QRIS Dinamis** secara lokal, tanpa memerlukan pendaftaran merchant baru ataupun payment gateway pihak ketiga (manual cashier confirmation).
+Fokus project saat ini: transaksi harian cepat, stok otomatis, QRIS dinamis lokal, laporan PDF rapi, backup/restore native, dan build Android APK.
 
-## Fitur Utama
+## Stack
 
-- **Dashboard Real-Time**: Ringkasan penjualan, modal, pengeluaran kas operasional, laba kotor, grafik tren penjualan, dan notifikasi otomatis produk dengan stok menipis.
-- **Kasir Penjualan & Pembelian (POS)**: Manajemen transaksi keluar masuk secara atomik (mengurangi/menambah stok otomatis) mendukung multi-metode pembayaran (Tunai, QRIS, Transfer).
-- **Manajemen Produk & Kategori**: CRUD lengkap data produk dengan SKU/barcode, unit satuan, harga beli, harga jual, stok minimum, pencarian, filter kategori, serta dukungan soft-delete demi menjaga integritas riwayat transaksi.
-- **Pencatatan Kas Operasional**: Pencatatan pemasukan dan pengeluaran kas non-transaksi produk secara mandiri.
-- **Cetak Laporan PDF**: Pembuatan laporan penjualan per periode tanggal ke file PDF temporer dan langsung membukanya di default PDF viewer perangkat (mendukung Share, Print, dan Save via Android Intent). Laporan diatur secara profesional (daftar produk diurutkan abjad, detail jumlah terjual, metode bayar) dengan summary laba-rugi diposisikan rapi di bagian bawah tabel.
-- **QRIS Dinamis Lokal**: Mengubah QRIS Statis merchant (format EMVCo) menjadi QRIS Dinamis dengan menyisipkan nominal nominal secara otomatis secara lokal menggunakan parser TLV dan generator checksum CRC16-CCITT.
-- **Multi-Profil Merchant QRIS**: Mengelola banyak data profil merchant QRIS terdaftar untuk kemudahan operasional multi-akun.
+- Frontend: React 19 + Vite 7
+- Backend: Tauri v2 + Rust
+- Database: SQLite lokal (`app_data_dir/mikrokas.db`)
+- Android: Tauri Android build, offline-first
+- PDF: jsPDF + viewer PDF native Android
+- QR/Barcode: jsQR untuk QRIS, ZXing untuk barcode produk
 
-## Struktur Kode Aplikasi
+## Fitur Saat Ini
+
+- Dashboard ringkasan pemasukan, pengeluaran, transaksi, laba, stok rendah, produk terlaris.
+- Dashboard Hari Ini tanpa grafik garis; rentang 7 hari/1 bulan tetap memakai grafik.
+- Kasir/POS penjualan dengan stok otomatis, diskon nominal/persen, customer opsional, metode pembayaran Tunai/QRIS/Transfer.
+- Barcode produk realtime dengan kamera + input manual barcode.
+- Pembelian/restock produk dengan UI mirip kasir.
+- Manajemen produk, kategori, supplier, customer.
+- Supplier dan customer punya detail modal, salin nomor, dan chat WhatsApp native.
+- Retur penjualan dengan dua tab: retur baru dan riwayat retur; retur bisa diedit dari halaman Retur Penjualan.
+- Manajemen Keuangan Toko: pemasukan penjualan otomatis, pengeluaran manual, pembelian/restock, retur, layout list 1 kolom.
+- QRIS dinamis lokal dari QRIS statis merchant, multi profil merchant, konfirmasi manual pembayaran.
+- Riwayat QRIS otomatis dibersihkan saat hari berganti.
+- Laporan PDF periode tanggal:
+  - Produk sama diakumulasi lintas periode.
+  - Tabel: Nama Produk, Jumlah, Metode Pembayaran, Harga Awal/modal, Total harga jual.
+  - Total Penjualan berada di baris paling bawah tabel utama.
+  - Ringkasan Keuangan sinkron dari total tabel utama.
+  - Ringkasan Metode Pembayaran tanpa Qty.
+- Backup/restore database via native file picker; tanpa mengetik path manual.
+- Log aplikasi internal untuk debugging Android.
+- Logo aplikasi, header, dan Profile memakai icon M geometric navy dari Stitch.
+- Android backup otomatis dimatikan agar uninstall + install ulang tidak memulihkan DB lama.
+
+## Keamanan Data
+
+- Database tidak dibundel di APK.
+- Data runtime disimpan di app private data Android.
+- Android manifest memakai:
+  - `android:allowBackup="false"`
+  - `android:fullBackupContent="false"`
+- Jika app data dir gagal, database hanya in-memory; tidak fallback ke file publik/temp.
+- File `.env`, database lokal, backup, keystore, APK/AAB build output tidak boleh masuk commit.
+
+## Struktur Kode
 
 ```text
-├── public/                 # Aset statis frontend (ikon, logo)
-├── src/                    # Frontend React 19 + Vite 7
-│   ├── assets/             # Aset gambar & media
-│   ├── components/         # Komponen UI global (ErrorBoundary, Layout, QrisScanner)
-│   ├── hooks/              # Custom React hooks (useToast, withRouter HOC)
-│   ├── pages/              # Halaman / Screen utama aplikasi
-│   │   ├── Dashboard.jsx   # Ringkasan insight penjualan, laba kotor, & stok menipis
-│   │   ├── Kas.jsx         # Kas masuk/keluar manual operasional toko
-│   │   ├── Keuangan.jsx    # Laba Rugi
-│   │   ├── Laporan.jsx     # Filter laporan & cetak PDF
-│   │   ├── Log.jsx         # Viewer log debug & ekspor log aplikasi
-│   │   ├── Pembelian.jsx   # Transaksi pembelian barang (restock produk)
-│   │   ├── Produk.jsx      # Manajemen data produk & kategori
-│   │   ├── Profile.jsx     # Pengaturan toko & kelola profil QRIS
-│   │   ├── Qris.jsx        # POS QRIS Dinamis & histori log pembayaran
-│   │   ├── Riwayat.jsx     # Detail & daftar riwayat transaksi
-│   │   ├── TokoSetup.jsx   # Inisialisasi awal nama toko & QRIS statis
-│   │   └── Transaksi.jsx   # POS penjualan (Kasir)
-│   ├── styles/             # Pengaturan tema CSS (global.css)
-│   ├── utils/              # Helper utilitas (decode QR canvas, IPC wrapped)
-│   ├── App.jsx             # Router aplikasi & diagnostic error listener
-│   └── main.jsx            # Entry point rendering React
-├── src-tauri/              # Backend Rust (Tauri v2 Core)
-│   ├── capabilities/       # Konfigurasi perizinan keamanan aplikasi
-│   ├── migrations/         # DDL Migrasi SQLite (001_init.sql, 002_qris_status.sql, 003_qris_profile.sql)
-│   ├── src/                # Kode sumber Rust
-│   │   ├── commands/       # Tauri IPC commands handler (bisnis logika)
-│   │   │   ├── dashboard_cmd.rs  # Logika hitung laba, produk terlaris, & tren harian
-│   │   │   ├── file_cmd.rs       # Logika penyimpanan berkas PDF temporer
-│   │   │   ├── kas_cmd.rs        # Logika entri kas operasional
-│   │   │   ├── kategori_cmd.rs   # Logika CRUD kategori produk
-│   │   │   ├── log_cmd.rs        # Logika pembacaan & penyalinan log diagnostik
-│   │   │   ├── produk_cmd.rs     # Logika CRUD data produk
-│   │   │   ├── qris_cmd.rs       # Logika log & status transaksi QRIS
-│   │   │   ├── qris_profile_cmd.rs  # Logika kelola profil merchant QRIS
-│   │   │   ├── qris_util_cmd.rs  # Logika parser & generator QRIS dengan fee
-│   │   │   ├── toko_cmd.rs       # Logika profil toko utama
-│   │   │   └── transaksi_cmd.rs  # Logika pembuatan & riwayat transaksi atomik
-│   │   ├── models/         # Struct model representasi tabel database
-│   │   ├── qris/           # Modul parser TLV EMVCo & hitung checksum CRC16
-│   │   ├── db.rs           # Koneksi database SQLite & inisialisasi WAL mode
-│   │   ├── lib.rs          # Konfigurasi Tauri builder & routing IPC handler
-│   │   ├── logger.rs       # Logger diagnostik internal ke berkas teks lokal
-│   │   ├── main.rs         # Entry point biner backend
-│   │   └── pdf_plugin.rs   # Tauri plugin untuk memicu Android Intent Viewer PDF
-│   ├── Cargo.toml          # Konfigurasi dependensi crate Rust & profil rilis
-│   ├── tauri.conf.json     # Konfigurasi Tauri v2 global
-│   └── tauri.android.conf.json
-├── LICENSE
-├── package.json            # Dependensi npm & script Vite
-└── vite.config.js          # Konfigurasi bundler Vite
+├── public/
+│   └── logo-header.png              # Logo icon M Stitch untuk UI
+├── src/
+│   ├── components/
+│   │   ├── Layout.jsx               # Header, bottom nav, swipe antar tab utama
+│   │   ├── LogoMark.jsx             # Render logo app
+│   │   └── BarcodeScanner.jsx       # Scanner barcode produk ZXing + manual input
+│   ├── pages/
+│   │   ├── Dashboard.jsx            # Ringkasan toko + quick stats
+│   │   ├── Transaksi.jsx            # Kasir penjualan
+│   │   ├── Pembelian.jsx            # Restock/pembelian produk
+│   │   ├── Produk.jsx               # CRUD produk + supplier dropdown
+│   │   ├── Customer.jsx             # CRUD customer + detail/copy/WhatsApp
+│   │   ├── Supplier.jsx             # CRUD supplier + detail/copy/WhatsApp
+│   │   ├── Keuangan.jsx             # Manajemen keuangan toko
+│   │   ├── Laporan.jsx              # Filter laporan + PDF
+│   │   ├── Retur.jsx                # Retur baru + riwayat/edit retur
+│   │   ├── Qris.jsx                 # QRIS dinamis + riwayat harian
+│   │   ├── QrisProfile.jsx          # Profil merchant QRIS
+│   │   ├── BackupRestore.jsx        # Backup/restore via native picker
+│   │   ├── Log.jsx                  # Viewer log aplikasi
+│   │   └── Profile.jsx              # Menu utama aplikasi
+│   ├── utils/
+│   │   ├── ipc.js                   # Wrapper invoke + logging IPC
+│   │   └── decodeQrImage.js         # Decode QRIS dari gambar
+│   └── App.jsx                      # Router + diagnostic listener
+├── src-tauri/
+│   ├── capabilities/                # Permission Tauri
+│   ├── gen/android/                 # Project Android generated Tauri
+│   │   └── app/src/main/AndroidManifest.xml
+│   ├── icons/                       # Icon app multi-size
+│   ├── migrations/                  # Migrasi SQLite
+│   └── src/
+│       ├── commands/
+│       │   ├── dashboard_cmd.rs     # Ringkasan dashboard + profit
+│       │   ├── file_cmd.rs          # Backup/restore + PDF temp file
+│       │   ├── kas_cmd.rs           # Keuangan toko terintegrasi
+│       │   ├── qris_cmd.rs          # QRIS log/status/prune harian
+│       │   ├── qris_profile_cmd.rs  # Profil merchant QRIS
+│       │   ├── produk_cmd.rs        # Produk + supplier join
+│       │   ├── supplier_cmd.rs      # Supplier CRUD
+│       │   ├── customer_cmd.rs      # Customer CRUD
+│       │   └── transaksi_cmd.rs     # Penjualan, pembelian, retur, laporan produk
+│       ├── db.rs                    # Init SQLite + migrasi idempotent
+│       ├── logger.rs                # Log internal app
+│       └── pdf_plugin.rs            # Buka PDF via native viewer
+├── package.json
+└── vite.config.js
 ```
+
+## Perintah Development
+
+```bash
+npm install
+npm run dev
+npm run build
+cd src-tauri && cargo check
+npm run tauri android build -- --target aarch64
+```
+
+APK release:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+```
+
+AAB release:
+
+```text
+src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+```
+
+## Catatan Android
+
+- Install ulang manual disarankan setelah uninstall lama.
+- Karena backup Android sudah dimatikan, install baru seharusnya membuka database kosong.
+- Jika perangkat masih memulihkan data lama, hapus storage aplikasi dari Settings sebelum uninstall.

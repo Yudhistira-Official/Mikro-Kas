@@ -6,7 +6,16 @@ dist/
 build/
 
 # Tauri generated and build artifacts
-src-tauri/gen/
+src-tauri/gen/*
+!src-tauri/gen/android/
+src-tauri/gen/android/*
+!src-tauri/gen/android/app/
+src-tauri/gen/android/app/*
+!src-tauri/gen/android/app/src/
+src-tauri/gen/android/app/src/*
+!src-tauri/gen/android/app/src/main/
+src-tauri/gen/android/app/src/main/*
+!src-tauri/gen/android/app/src/main/AndroidManifest.xml
 src-tauri/target/
 
 # Environment variables

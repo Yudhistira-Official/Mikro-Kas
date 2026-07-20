@@ -4,8 +4,8 @@
 //! untuk kontrol penuh atas transaksi dan koneksi.
 //! DB disimpan di app_data_dir/mikrokas.db dengan WAL mode.
 //!
-//! NOTE: init_db TIDAK PERNAH gagal — jika app_data_dir tak bisa dipakai,
-//! fallback ke /tmp/mikrokas.db agar aplikasi tetap jalan.
+//! NOTE: init_db tidak memakai fallback file publik/temp.
+//! Jika app_data_dir gagal, DB sementara dibuat in-memory agar tidak menyimpan data liar.
 
 use rusqlite::Connection;
 use std::path::PathBuf;
