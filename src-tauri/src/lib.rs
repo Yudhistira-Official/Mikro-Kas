@@ -61,6 +61,8 @@ pub fn run() {
             commands::dashboard_cmd::get_penjualan_harian,
             commands::dashboard_cmd::get_produk_terlaris,
             commands::dashboard_cmd::get_keuntungan_penjualan,
+            commands::dashboard_cmd::get_transaksi_count,
+            commands::dashboard_cmd::get_recent_transactions,
             // Kas manual
             commands::kas_cmd::list_kas,
             commands::kas_cmd::create_kas,
@@ -88,6 +90,37 @@ pub fn run() {
             commands::log_cmd::read_log,
             commands::log_cmd::write_log,
             commands::log_cmd::copy_log_to_downloads,
+            // Customer
+            commands::customer_cmd::list_customer,
+            commands::customer_cmd::create_customer,
+            commands::customer_cmd::update_customer,
+            commands::customer_cmd::delete_customer,
+            commands::customer_cmd::get_customer,
+            // Supplier
+            commands::supplier_cmd::list_supplier,
+            commands::supplier_cmd::get_supplier,
+            commands::supplier_cmd::create_supplier,
+            commands::supplier_cmd::update_supplier,
+            commands::supplier_cmd::delete_supplier,
+            // Hutang/Piutang
+            commands::hutang_piutang_cmd::list_hutang_piutang,
+            commands::hutang_piutang_cmd::create_hutang_piutang,
+            commands::hutang_piutang_cmd::bayar_hutang_piutang,
+            commands::hutang_piutang_cmd::delete_hutang_piutang,
+            // Cashbox
+            commands::cashbox_cmd::list_cashbox,
+            commands::cashbox_cmd::create_cashbox,
+            commands::cashbox_cmd::mutasi_cashbox,
+            commands::cashbox_cmd::list_cashbox_mutasi,
+            // Retur penjualan
+            commands::transaksi_cmd::retur_penjualan,
+            commands::transaksi_cmd::list_retur,
+            commands::transaksi_cmd::get_retur_detail,
+            commands::transaksi_cmd::update_retur_penjualan,
+            // Backup/Restore
+            commands::file_cmd::backup_database,
+            commands::file_cmd::backup_database_to,
+            commands::file_cmd::restore_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MikroKas");

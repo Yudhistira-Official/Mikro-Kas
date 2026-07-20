@@ -205,18 +205,20 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
   const [showNewKat, setShowNewKat] = useState(false);
   const [newKatNama, setNewKatNama] = useState("");
   const [katList, setKatList] = useState(kategori);
+  const [supplierList, setSupplierList] = useState([]);
   const [form, setForm] = useState({
-    nama: "", kategori_id: null, sku: "", satuan: "pcs",
+    nama: "", kategori_id: null, supplier_id: null, sku: "", satuan: "pcs",
     harga_beli: "", harga_jual: "", stok: "", stok_minimum: "",
   });
 
   useEffect(() => { setKatList(kategori); }, [kategori]);
+  useEffect(() => { invoke("list_supplier").then(setSupplierList).catch(console.error); }, []);
 
   useEffect(() => {
     if (editId) {
       invoke("get_produk", { id: editId }).then((p) => {
         setForm({
-          nama: p.nama, kategori_id: p.kategori_id, sku: p.sku || "",
+          nama: p.nama, kategori_id: p.kategori_id, supplier_id: p.supplier_id, sku: p.sku || "",
           satuan: p.satuan, harga_beli: String(p.harga_beli),
           harga_jual: String(p.harga_jual), stok: String(p.stok),
           stok_minimum: String(p.stok_minimum),
@@ -254,8 +256,9 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
       const input = {
         nama: form.nama.trim(),
         kategori_id: form.kategori_id || null,
+        supplier_id: form.supplier_id || null,
         sku: form.sku.trim() || null,
-        satuan: form.satuan || "pcs",
+        satuan: form.satuan.trim() || "pcs",
         harga_beli: parseInt(form.harga_beli) || 0,
         harga_jual: parseInt(form.harga_jual),
         stok: parseInt(form.stok) || 0,
@@ -307,6 +310,13 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
                 <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }} onClick={() => { setShowNewKat(false); setNewKatNama(""); }}>Batal</button>
               </div>
             )}
+          </div>
+          <div>
+            <label className="input-label">Supplier</label>
+            <select className="input-field" value={form.supplier_id || ""} onChange={(e) => setForm((prev) => ({ ...prev, supplier_id: e.target.value ? parseInt(e.target.value) : null }))}>
+              <option value="">— Pilih Supplier —</option>
+              {supplierList.map((s) => <option key={s.id} value={s.id}>{s.nama}</option>)}
+            </select>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <div>

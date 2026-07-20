@@ -74,3 +74,71 @@ pub fn simpan_pdf(
         return Ok(path_str);
     }
 }
+
+/// Backup database SQLite ke file cache export. Return path agar user bisa share/salin.
+#[tauri::command]
+pub fn backup_database(app: tauri::AppHandle, _state: State<DbState>) -> Result<String, String> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Gagal cache dir: {e}"))?
+        .join("exports");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Gagal buat folder backup: {e}"))?;
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let target = cache_dir.join(format!("mikrokas_backup_{stamp}.db"));
+    copy_database_to(app, target)
+}
+
+/// Backup database SQLite ke lokasi yang dipilih user dari dialog native.
+/// Validasi minimal: ekstensi .db dan parent folder sudah ada.
+#[tauri::command]
+pub fn backup_database_to(
+    app: tauri::AppHandle,
+    _state: State<DbState>,
+    target_path: String,
+) -> Result<String, String> {
+    let mut target = std::path::PathBuf::from(target_path);
+    if target.extension().and_then(|e| e.to_str()) != Some("db") {
+        target.set_extension("db");
+    }
+    let parent = target.parent().ok_or("Lokasi backup tidak valid")?;
+    if !parent.exists() {
+        return Err("Folder tujuan backup tidak ditemukan".into());
+    }
+    copy_database_to(app, target)
+}
+
+/// Helper copy DB agar command cache lama dan dialog native berbagi logika.
+fn copy_database_to(app: tauri::AppHandle, target: std::path::PathBuf) -> Result<String, String> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Gagal app data dir: {e}"))?;
+    let db_path = app_dir.join("mikrokas.db");
+    if !db_path.exists() {
+        return Err("Database belum ada".into());
+    }
+    std::fs::copy(&db_path, &target).map_err(|e| format!("Gagal backup DB: {e}"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Restore database dari path file backup. App perlu direstart setelah restore.
+#[tauri::command]
+pub fn restore_database(
+    app: tauri::AppHandle,
+    _state: State<DbState>,
+    backup_path: String,
+) -> Result<(), String> {
+    let source = std::path::PathBuf::from(backup_path);
+    if !source.exists() {
+        return Err("File backup tidak ditemukan".into());
+    }
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Gagal app data dir: {e}"))?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| format!("Gagal buat app dir: {e}"))?;
+    let db_path = app_dir.join("mikrokas.db");
+    std::fs::copy(&source, &db_path).map_err(|e| format!("Gagal restore DB: {e}"))?;
+    Ok(())
+}

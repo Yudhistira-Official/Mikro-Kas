@@ -5,6 +5,8 @@ pub struct Produk {
     pub id: i64,
     pub kategori_id: Option<i64>,
     pub kategori_nama: Option<String>,
+    pub supplier_id: Option<i64>,
+    pub supplier_nama: Option<String>,
     pub nama: String,
     pub sku: Option<String>,
     pub satuan: String,
@@ -20,6 +22,7 @@ pub struct Produk {
 #[derive(Debug, Deserialize)]
 pub struct ProdukInput {
     pub kategori_id: Option<i64>,
+    pub supplier_id: Option<i64>,
     pub nama: String,
     pub sku: Option<String>,
     pub satuan: Option<String>,

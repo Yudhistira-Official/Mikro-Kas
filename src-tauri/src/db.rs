@@ -37,36 +37,100 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
         }
     };
 
-    // Set pragma: journal_mode=DELETE agar kompatibel Android,
-    // foreign_keys=ON untuk integrity, busy_timeout agar tidak cepat error.
     let _ = conn.execute_batch(
         "PRAGMA journal_mode=DELETE;
          PRAGMA foreign_keys=ON;
          PRAGMA busy_timeout=5000;",
     );
 
-    // Jalankan migrasi dari file SQL. Jika tabel sudah ada (error),
-    // abaikan — migrasi idempoten.
     eprintln!("DB_INIT: Running migrations");
     match conn.execute_batch(include_str!("../migrations/001_init.sql")) {
         Ok(_) => eprintln!("DB_INIT: Migrasi 001 sukses"),
         Err(e) => eprintln!("DB_INIT: Migrasi 001 gagal (mungkin tabel sudah ada): {e}"),
     }
 
-    // Jalankan migrasi status QRIS.
     match conn.execute_batch(include_str!("../migrations/002_qris_status.sql")) {
         Ok(_) => eprintln!("DB_INIT: Migrasi 002 sukses"),
         Err(e) => eprintln!("DB_INIT: Migrasi 002 gagal/sudah pernah: {e}"),
     }
 
-    // Profil QRIS multi-merchant. Error duplicate-column aman untuk DB lama.
     match conn.execute_batch(include_str!("../migrations/003_qris_profile.sql")) {
         Ok(_) => eprintln!("DB_INIT: Migrasi 003 sukses"),
         Err(e) => eprintln!("DB_INIT: Migrasi 003 gagal/sudah pernah: {e}"),
     }
 
+    match conn.execute_batch(include_str!("../migrations/004_fitur_baru.sql")) {
+        Ok(_) => eprintln!("DB_INIT: Migrasi 004 sukses"),
+        Err(e) => eprintln!("DB_INIT: Migrasi 004 gagal/sudah pernah: {e}"),
+    }
+
+    ensure_column(&conn, "customer", "deskripsi_tambahan", "TEXT");
+    ensure_column(&conn, "supplier", "deskripsi_tambahan", "TEXT");
+    ensure_column(
+        &conn,
+        "produk",
+        "supplier_id",
+        "INTEGER REFERENCES supplier(id)",
+    );
+
+    // Tabel retur terpisah agar riwayat retur bisa dilihat dan diedit tanpa menghapus kas manual.
+    let _ = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS retur (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaksi_id INTEGER NOT NULL REFERENCES transaksi(id) ON DELETE CASCADE,
+            kas_id INTEGER REFERENCES kas(id) ON DELETE SET NULL,
+            total_refund INTEGER NOT NULL,
+            alasan TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS retur_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            retur_id INTEGER NOT NULL REFERENCES retur(id) ON DELETE CASCADE,
+            produk_id INTEGER NOT NULL REFERENCES produk(id),
+            qty INTEGER NOT NULL,
+            harga_satuan INTEGER NOT NULL,
+            subtotal INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_retur_transaksi ON retur(transaksi_id);
+        CREATE INDEX IF NOT EXISTS idx_retur_item_retur ON retur_item(retur_id);"
+    );
+
     eprintln!("DB_INIT: Success");
     conn
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = match conn.prepare(&pragma) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            eprintln!("DB_INIT: PRAGMA {table} gagal: {e}");
+            return;
+        }
+    };
+    let has_column = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .ok()
+        .and_then(|rows| {
+            for row in rows {
+                if row.ok()?.as_str() == column {
+                    return Some(true);
+                }
+            }
+            Some(false)
+        })
+        .unwrap_or(false);
+
+    if has_column {
+        return;
+    }
+
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    match conn.execute(&sql, []) {
+        Ok(_) => eprintln!("DB_INIT: Kolom {table}.{column} ditambahkan"),
+        Err(e) => eprintln!("DB_INIT: Kolom {table}.{column} gagal ditambahkan: {e}"),
+    }
 }
 
 fn ensure_dir(dir: &PathBuf) -> Result<(), String> {

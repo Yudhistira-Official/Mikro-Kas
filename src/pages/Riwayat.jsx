@@ -9,12 +9,11 @@ import { useToast } from "../hooks/useToast";
 
 const rupiah = (n) => `Rp ${Number(n).toLocaleString("id-ID")}`;
 const today = () => new Date().toISOString().slice(0, 10);
-const firstDate = () => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); };
 const isEditable = (date) => Date.now() - new Date(`${date.replace(" ", "T")}Z`).getTime() <= 48 * 60 * 60 * 1000;
 
 export default function Riwayat() {
   const { addToast } = useToast();
-  const [dari, setDari] = useState(firstDate);
+  const [dari, setDari] = useState(today);
   const [sampai, setSampai] = useState(today);
   const [list, setList] = useState([]);
   const [produk, setProduk] = useState([]);

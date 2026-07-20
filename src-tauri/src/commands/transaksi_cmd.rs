@@ -24,6 +24,8 @@ pub fn buat_transaksi_penjualan(
     items: Vec<ItemInput>,
     metode_bayar: String,
     catatan: Option<String>,
+    diskon_nominal: Option<i64>,
+    customer_id: Option<i64>,
 ) -> Result<TransaksiResult, String> {
     crate::logger::log(&format!(
         "COMMAND: buat_transaksi_penjualan dipanggil; items_count={}, metode_bayar={}",
@@ -68,9 +70,24 @@ pub fn buat_transaksi_penjualan(
         .map_err(|e| e.to_string())?;
     }
 
+    // Diskon dan customer disimpan di catatan agar tidak mengubah skema transaksi lama.
+    // ponytail: pindah ke kolom terpisah jika laporan per-customer/diskon jadi kebutuhan wajib.
+    let diskon = diskon_nominal.unwrap_or(0).max(0).min(total);
+    let total_final = total - diskon;
+    let catatan_final = match (catatan, customer_id, diskon > 0) {
+        (Some(c), Some(cid), true) => Some(format!("{c} | customer_id={cid} | diskon={diskon}")),
+        (Some(c), Some(cid), false) => Some(format!("{c} | customer_id={cid}")),
+        (Some(c), None, true) => Some(format!("{c} | diskon={diskon}")),
+        (Some(c), None, false) => Some(c),
+        (None, Some(cid), true) => Some(format!("customer_id={cid} | diskon={diskon}")),
+        (None, Some(cid), false) => Some(format!("customer_id={cid}")),
+        (None, None, true) => Some(format!("diskon={diskon}")),
+        (None, None, false) => None,
+    };
+
     tx.execute(
         "INSERT INTO transaksi (tipe, total, metode_bayar, catatan) VALUES ('penjualan', ?1, ?2, ?3)",
-        params![total, metode_bayar, catatan],
+        params![total_final, metode_bayar, catatan_final],
     )
     .map_err(|e| e.to_string())?;
     let transaksi_id: i64 = tx.last_insert_rowid();
@@ -490,5 +507,198 @@ pub fn delete_transaksi_penjualan(state: State<DbState>, id: i64) -> Result<(), 
         .map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReturListItem {
+    pub id: i64,
+    pub transaksi_id: i64,
+    pub total_refund: i64,
+    pub alasan: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReturItemDetail {
+    pub produk_id: i64,
+    pub produk_nama: String,
+    pub qty: i64,
+    pub harga_satuan: i64,
+    pub subtotal: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReturDetail {
+    pub header: ReturListItem,
+    pub items: Vec<ReturItemDetail>,
+}
+
+/// Retur penjualan: stok kembali, total penjualan dikurangi, refund masuk kas.
+/// Data retur disimpan terpisah agar riwayat bisa diedit dari halaman Retur Penjualan.
+#[tauri::command]
+pub fn retur_penjualan(
+    state: State<DbState>,
+    transaksi_id: i64,
+    items: Vec<ItemInput>,
+    alasan: Option<String>,
+) -> Result<TransaksiResult, String> {
+    if items.is_empty() {
+        return Err("Item retur wajib diisi".into());
+    }
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let refund_note = alasan.unwrap_or_else(|| format!("Retur transaksi #{transaksi_id}"));
+    let refund_total = apply_retur_forward(&tx, transaksi_id, &items)?;
+
+    tx.execute(
+        "UPDATE transaksi SET total = CASE WHEN total - ?1 < 0 THEN 0 ELSE total - ?1 END,
+         catatan = COALESCE(catatan, '') || CASE WHEN COALESCE(catatan, '') = '' THEN '' ELSE ' | ' END || ?2
+         WHERE id = ?3",
+        params![refund_total, refund_note, transaksi_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO kas (tipe, kategori, jumlah, keterangan) VALUES ('pengeluaran', 'Retur Penjualan', ?1, ?2)",
+        params![refund_total, refund_note],
+    )
+    .map_err(|e| e.to_string())?;
+    let kas_id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO retur (transaksi_id, kas_id, total_refund, alasan) VALUES (?1, ?2, ?3, ?4)",
+        params![transaksi_id, kas_id, refund_total, refund_note],
+    )
+    .map_err(|e| e.to_string())?;
+    let retur_id = tx.last_insert_rowid();
+    insert_retur_items(&tx, retur_id, &items)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(TransaksiResult { transaksi_id, total: refund_total })
+}
+
+#[tauri::command]
+pub fn list_retur(state: State<DbState>) -> Result<Vec<ReturListItem>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, transaksi_id, total_refund, alasan, created_at FROM retur ORDER BY created_at DESC, id DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| Ok(ReturListItem {
+        id: row.get(0)?, transaksi_id: row.get(1)?, total_refund: row.get(2)?, alasan: row.get(3)?, created_at: row.get(4)?,
+    })).map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows { result.push(row.map_err(|e| e.to_string())?); }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn get_retur_detail(state: State<DbState>, id: i64) -> Result<ReturDetail, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let header = conn.query_row(
+        "SELECT id, transaksi_id, total_refund, alasan, created_at FROM retur WHERE id=?1",
+        params![id],
+        |row| Ok(ReturListItem { id: row.get(0)?, transaksi_id: row.get(1)?, total_refund: row.get(2)?, alasan: row.get(3)?, created_at: row.get(4)? }),
+    ).map_err(|_| "Retur tidak ditemukan".to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT ri.produk_id, p.nama, ri.qty, ri.harga_satuan, ri.subtotal
+         FROM retur_item ri JOIN produk p ON p.id = ri.produk_id WHERE ri.retur_id=?1 ORDER BY p.nama ASC",
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![id], |row| Ok(ReturItemDetail {
+        produk_id: row.get(0)?, produk_nama: row.get(1)?, qty: row.get(2)?, harga_satuan: row.get(3)?, subtotal: row.get(4)?,
+    })).map_err(|e| e.to_string())?;
+    let mut items = Vec::new();
+    for row in rows { items.push(row.map_err(|e| e.to_string())?); }
+    Ok(ReturDetail { header, items })
+}
+
+#[tauri::command]
+pub fn update_retur_penjualan(
+    state: State<DbState>,
+    retur_id: i64,
+    items: Vec<ItemInput>,
+    alasan: Option<String>,
+) -> Result<TransaksiResult, String> {
+    if items.is_empty() {
+        return Err("Item retur wajib diisi".into());
+    }
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let (transaksi_id, kas_id, old_total): (i64, Option<i64>, i64) = tx.query_row(
+        "SELECT transaksi_id, kas_id, total_refund FROM retur WHERE id=?1",
+        params![retur_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|_| "Retur tidak ditemukan".to_string())?;
+
+    reverse_retur(&tx, retur_id, transaksi_id, old_total)?;
+    let refund_total = apply_retur_forward(&tx, transaksi_id, &items)?;
+    let refund_note = alasan.unwrap_or_else(|| format!("Retur transaksi #{transaksi_id}"));
+
+    tx.execute(
+        "UPDATE transaksi SET total = CASE WHEN total - ?1 < 0 THEN 0 ELSE total - ?1 END,
+         catatan = COALESCE(catatan, '') || ' | edit_retur=' || ?2 WHERE id=?3",
+        params![refund_total, retur_id, transaksi_id],
+    ).map_err(|e| e.to_string())?;
+    if let Some(kid) = kas_id {
+        tx.execute("UPDATE kas SET jumlah=?1, keterangan=?2 WHERE id=?3", params![refund_total, refund_note, kid]).map_err(|e| e.to_string())?;
+    }
+    tx.execute(
+        "UPDATE retur SET total_refund=?1, alasan=?2, updated_at=datetime('now') WHERE id=?3",
+        params![refund_total, refund_note, retur_id],
+    ).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM retur_item WHERE retur_id=?1", params![retur_id]).map_err(|e| e.to_string())?;
+    insert_retur_items(&tx, retur_id, &items)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(TransaksiResult { transaksi_id, total: refund_total })
+}
+
+fn apply_retur_forward(tx: &rusqlite::Transaction<'_>, transaksi_id: i64, items: &[ItemInput]) -> Result<i64, String> {
+    let tipe: String = tx.query_row("SELECT tipe FROM transaksi WHERE id=?1", params![transaksi_id], |row| row.get(0))
+        .map_err(|_| "Transaksi asal tidak ditemukan".to_string())?;
+    if tipe != "penjualan" { return Err("Retur hanya untuk transaksi penjualan".into()); }
+    let mut refund_total = 0;
+    for item in items {
+        if item.qty <= 0 { return Err("Qty retur harus minimal 1".into()); }
+        let (sold_qty, harga): (i64, i64) = tx.query_row(
+            "SELECT qty, harga_satuan FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2",
+            params![transaksi_id, item.produk_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|_| format!("Produk ID {} tidak ada di transaksi asal", item.produk_id))?;
+        if item.qty > sold_qty { return Err(format!("Qty retur melebihi qty jual ({sold_qty})")); }
+        refund_total += item.qty * harga;
+        tx.execute("UPDATE produk SET stok = stok + ?1, updated_at=datetime('now') WHERE id=?2", params![item.qty, item.produk_id]).map_err(|e| e.to_string())?;
+        let sisa = sold_qty - item.qty;
+        if sisa > 0 {
+            tx.execute("UPDATE transaksi_item SET qty=?1, subtotal=?1 * harga_satuan WHERE transaksi_id=?2 AND produk_id=?3", params![sisa, transaksi_id, item.produk_id]).map_err(|e| e.to_string())?;
+        } else {
+            tx.execute("DELETE FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2", params![transaksi_id, item.produk_id]).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(refund_total)
+}
+
+fn reverse_retur(tx: &rusqlite::Transaction<'_>, retur_id: i64, transaksi_id: i64, old_total: i64) -> Result<(), String> {
+    let mut stmt = tx.prepare("SELECT produk_id, qty, harga_satuan FROM retur_item WHERE retur_id=?1").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![retur_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))).map_err(|e| e.to_string())?;
+    for row in rows {
+        let (produk_id, qty, harga) = row.map_err(|e| e.to_string())?;
+        tx.execute("UPDATE produk SET stok = CASE WHEN stok - ?1 < 0 THEN 0 ELSE stok - ?1 END, updated_at=datetime('now') WHERE id=?2", params![qty, produk_id]).map_err(|e| e.to_string())?;
+        let exists: i64 = tx.query_row("SELECT COUNT(*) FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2", params![transaksi_id, produk_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if exists > 0 {
+            tx.execute("UPDATE transaksi_item SET qty=qty+?1, subtotal=(qty+?1)*harga_satuan WHERE transaksi_id=?2 AND produk_id=?3", params![qty, transaksi_id, produk_id]).map_err(|e| e.to_string())?;
+        } else {
+            tx.execute("INSERT INTO transaksi_item (transaksi_id, produk_id, qty, harga_satuan, subtotal) VALUES (?1, ?2, ?3, ?4, ?5)", params![transaksi_id, produk_id, qty, harga, qty * harga]).map_err(|e| e.to_string())?;
+        }
+    }
+    drop(stmt);
+    tx.execute("UPDATE transaksi SET total=total+?1 WHERE id=?2", params![old_total, transaksi_id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn insert_retur_items(tx: &rusqlite::Transaction<'_>, retur_id: i64, items: &[ItemInput]) -> Result<(), String> {
+    for item in items {
+        let harga: i64 = tx.query_row("SELECT harga_jual FROM produk WHERE id=?1", params![item.produk_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO retur_item (retur_id, produk_id, qty, harga_satuan, subtotal) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![retur_id, item.produk_id, item.qty, harga, item.qty * harga],
+        ).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }

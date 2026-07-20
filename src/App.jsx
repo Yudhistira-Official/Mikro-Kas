@@ -29,6 +29,12 @@ import Pembelian from "./pages/Pembelian";
 import Riwayat from "./pages/Riwayat";
 import Laporan from "./pages/Laporan";
 import Log from "./pages/Log";
+import Customer from "./pages/Customer";
+import Supplier from "./pages/Supplier";
+import HutangPiutang from "./pages/HutangPiutang";
+import Cashbox from "./pages/Cashbox";
+import Retur from "./pages/Retur";
+import BackupRestore from "./pages/BackupRestore";
 
 // ============================================================
 // Logger JS → Rust (fire-and-forget, tidak throw).
@@ -166,6 +172,12 @@ function App() {
           <Route path="/riwayat" element={<Riwayat />} />
           <Route path="/laporan" element={<Laporan />} />
           <Route path="/log" element={<Log />} />
+          <Route path="/customer" element={<Customer />} />
+          <Route path="/supplier" element={<Supplier />} />
+          <Route path="/hutang-piutang" element={<HutangPiutang />} />
+          <Route path="/cashbox" element={<Cashbox />} />
+          <Route path="/retur" element={<Retur />} />
+          <Route path="/backup-restore" element={<BackupRestore />} />
           <Route path="/toko" element={<TokoSetup />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

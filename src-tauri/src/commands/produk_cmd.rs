@@ -3,6 +3,34 @@ use crate::models::produk::{Produk, ProdukInput};
 use rusqlite::params;
 use tauri::State;
 
+const PRODUK_SELECT: &str =
+    "SELECT p.id, p.kategori_id, k.nama, p.supplier_id, s.nama, p.nama, p.sku, p.satuan,
+                p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
+                p.is_active, p.created_at, p.updated_at
+         FROM produk p
+         LEFT JOIN kategori k ON k.id = p.kategori_id
+         LEFT JOIN supplier s ON s.id = p.supplier_id";
+
+fn map_produk(row: &rusqlite::Row<'_>) -> rusqlite::Result<Produk> {
+    Ok(Produk {
+        id: row.get(0)?,
+        kategori_id: row.get(1)?,
+        kategori_nama: row.get(2)?,
+        supplier_id: row.get(3)?,
+        supplier_nama: row.get(4)?,
+        nama: row.get(5)?,
+        sku: row.get(6)?,
+        satuan: row.get(7)?,
+        harga_beli: row.get(8)?,
+        harga_jual: row.get(9)?,
+        stok: row.get(10)?,
+        stok_minimum: row.get(11)?,
+        is_active: row.get::<_, i64>(12)? != 0,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
+    })
+}
+
 #[tauri::command]
 pub fn list_produk(
     state: State<DbState>,
@@ -11,14 +39,8 @@ pub fn list_produk(
     only_active: Option<bool>,
 ) -> Result<Vec<Produk>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut sql = String::from(
-        "SELECT p.id, p.kategori_id, k.nama, p.nama, p.sku, p.satuan,
-                p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
-                p.is_active, p.created_at, p.updated_at
-         FROM produk p
-         LEFT JOIN kategori k ON k.id = p.kategori_id
-         WHERE 1=1",
-    );
+    let mut sql = String::from(PRODUK_SELECT);
+    sql.push_str(" WHERE 1=1");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx = 0;
 
@@ -44,23 +66,7 @@ pub fn list_produk(
         param_values.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params_ref.as_slice(), |row| {
-            Ok(Produk {
-                id: row.get(0)?,
-                kategori_id: row.get(1)?,
-                kategori_nama: row.get(2)?,
-                nama: row.get(3)?,
-                sku: row.get(4)?,
-                satuan: row.get(5)?,
-                harga_beli: row.get(6)?,
-                harga_jual: row.get(7)?,
-                stok: row.get(8)?,
-                stok_minimum: row.get(9)?,
-                is_active: row.get::<_, i64>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })
+        .query_map(params_ref.as_slice(), map_produk)
         .map_err(|e| e.to_string())?;
 
     let mut result = Vec::new();
@@ -74,30 +80,9 @@ pub fn list_produk(
 pub fn get_produk(state: State<DbState>, id: i64) -> Result<Produk, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT p.id, p.kategori_id, k.nama, p.nama, p.sku, p.satuan,
-                p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
-                p.is_active, p.created_at, p.updated_at
-         FROM produk p
-         LEFT JOIN kategori k ON k.id = p.kategori_id
-         WHERE p.id = ?1",
+        &format!("{} WHERE p.id = ?1", PRODUK_SELECT),
         params![id],
-        |row| {
-            Ok(Produk {
-                id: row.get(0)?,
-                kategori_id: row.get(1)?,
-                kategori_nama: row.get(2)?,
-                nama: row.get(3)?,
-                sku: row.get(4)?,
-                satuan: row.get(5)?,
-                harga_beli: row.get(6)?,
-                harga_jual: row.get(7)?,
-                stok: row.get(8)?,
-                stok_minimum: row.get(9)?,
-                is_active: row.get::<_, i64>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        },
+        map_produk,
     )
     .map_err(|e| format!("Produk tidak ditemukan: {}", e))
 }
@@ -106,10 +91,11 @@ pub fn get_produk(state: State<DbState>, id: i64) -> Result<Produk, String> {
 pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO produk (kategori_id, nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO produk (kategori_id, supplier_id, nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             input.kategori_id,
+            input.supplier_id,
             input.nama,
             input.sku,
             input.satuan.unwrap_or_else(|| "pcs".to_string()),
@@ -121,33 +107,11 @@ pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk
     )
     .map_err(|e| format!("Gagal simpan produk: {}", e))?;
     let id = conn.last_insert_rowid();
-    // Query langsung tanpa fungsi terpisah untuk hindari borrow conflict
     let produk = conn
         .query_row(
-            "SELECT p.id, p.kategori_id, k.nama, p.nama, p.sku, p.satuan,
-                p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
-                p.is_active, p.created_at, p.updated_at
-         FROM produk p
-         LEFT JOIN kategori k ON k.id = p.kategori_id
-         WHERE p.id = ?1",
+            &format!("{} WHERE p.id = ?1", PRODUK_SELECT),
             params![id],
-            |row| {
-                Ok(Produk {
-                    id: row.get(0)?,
-                    kategori_id: row.get(1)?,
-                    kategori_nama: row.get(2)?,
-                    nama: row.get(3)?,
-                    sku: row.get(4)?,
-                    satuan: row.get(5)?,
-                    harga_beli: row.get(6)?,
-                    harga_jual: row.get(7)?,
-                    stok: row.get(8)?,
-                    stok_minimum: row.get(9)?,
-                    is_active: row.get::<_, i64>(10)? != 0,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
-                })
-            },
+            map_produk,
         )
         .map_err(|e| format!("Gagal mengambil produk baru: {}", e))?;
     Ok(produk)
@@ -157,12 +121,13 @@ pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk
 pub fn update_produk(state: State<DbState>, id: i64, input: ProdukInput) -> Result<Produk, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE produk SET kategori_id=?1, nama=?2, sku=?3, satuan=?4,
-         harga_beli=?5, harga_jual=?6, stok=?7, stok_minimum=?8,
+        "UPDATE produk SET kategori_id=?1, supplier_id=?2, nama=?3, sku=?4, satuan=?5,
+         harga_beli=?6, harga_jual=?7, stok=?8, stok_minimum=?9,
          updated_at=datetime('now')
-         WHERE id=?9",
+         WHERE id=?10",
         params![
             input.kategori_id,
+            input.supplier_id,
             input.nama,
             input.sku,
             input.satuan.unwrap_or_else(|| "pcs".to_string()),
@@ -174,33 +139,11 @@ pub fn update_produk(state: State<DbState>, id: i64, input: ProdukInput) -> Resu
         ],
     )
     .map_err(|e| format!("Gagal update produk: {}", e))?;
-    // Query langsung tanpa fungsi terpisah
     let produk = conn
         .query_row(
-            "SELECT p.id, p.kategori_id, k.nama, p.nama, p.sku, p.satuan,
-                p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
-                p.is_active, p.created_at, p.updated_at
-         FROM produk p
-         LEFT JOIN kategori k ON k.id = p.kategori_id
-         WHERE p.id = ?1",
+            &format!("{} WHERE p.id = ?1", PRODUK_SELECT),
             params![id],
-            |row| {
-                Ok(Produk {
-                    id: row.get(0)?,
-                    kategori_id: row.get(1)?,
-                    kategori_nama: row.get(2)?,
-                    nama: row.get(3)?,
-                    sku: row.get(4)?,
-                    satuan: row.get(5)?,
-                    harga_beli: row.get(6)?,
-                    harga_jual: row.get(7)?,
-                    stok: row.get(8)?,
-                    stok_minimum: row.get(9)?,
-                    is_active: row.get::<_, i64>(10)? != 0,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
-                })
-            },
+            map_produk,
         )
         .map_err(|e| format!("Gagal mengambil produk: {}", e))?;
     Ok(produk)
@@ -222,35 +165,12 @@ pub fn delete_produk(state: State<DbState>, id: i64) -> Result<(), String> {
 pub fn list_produk_low_stock(state: State<DbState>) -> Result<Vec<Produk>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(
-            "SELECT p.id, p.kategori_id, k.nama, p.nama, p.sku, p.satuan,
-                    p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
-                    p.is_active, p.created_at, p.updated_at
-             FROM produk p
-             LEFT JOIN kategori k ON k.id = p.kategori_id
-             WHERE p.is_active = 1 AND p.stok < p.stok_minimum
-             ORDER BY p.stok ASC",
-        )
+        .prepare(&format!(
+            "{} WHERE p.is_active = 1 AND p.stok < p.stok_minimum ORDER BY p.stok ASC",
+            PRODUK_SELECT
+        ))
         .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Produk {
-                id: row.get(0)?,
-                kategori_id: row.get(1)?,
-                kategori_nama: row.get(2)?,
-                nama: row.get(3)?,
-                sku: row.get(4)?,
-                satuan: row.get(5)?,
-                harga_beli: row.get(6)?,
-                harga_jual: row.get(7)?,
-                stok: row.get(8)?,
-                stok_minimum: row.get(9)?,
-                is_active: row.get::<_, i64>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], map_produk).map_err(|e| e.to_string())?;
     let mut result = Vec::new();
     for row in rows {
         result.push(row.map_err(|e| e.to_string())?);

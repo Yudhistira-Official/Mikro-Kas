@@ -1,3 +1,10 @@
+//! Command dashboard terintegrasi transaksi + kas.
+//!
+//! Sumber kebenaran:
+//!   - Penjualan/pemasukan: tabel transaksi tipe='penjualan'.
+//!   - Pembelian/restock: tabel transaksi tipe='pembelian'.
+//!   - Pengeluaran manual + retur: tabel kas tipe='pengeluaran'.
+//! Retur sudah mengurangi transaksi penjualan dan menambah kas pengeluaran.
 use crate::db::DbState;
 use rusqlite::params;
 use serde::Serialize;
@@ -34,6 +41,65 @@ pub struct KeuntunganPenjualan {
     pub total_keuntungan: i64,
 }
 
+/// Transaksi terbaru untuk dashboard.
+#[derive(Debug, Serialize)]
+pub struct TransaksiRingkas {
+    pub id: i64,
+    pub tipe: String,
+    pub total: i64,
+    pub metode_bayar: String,
+    pub tanggal: String,
+}
+
+#[tauri::command]
+pub fn get_transaksi_count(
+    state: State<DbState>,
+    dari: String,
+    sampai: String,
+) -> Result<i64, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let sampai_with_time = format!("{} 23:59:59", sampai);
+    conn.query_row(
+        "SELECT COUNT(*) FROM transaksi WHERE tipe='penjualan' AND tanggal BETWEEN ?1 AND ?2",
+        params![dari, sampai_with_time],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_recent_transactions(
+    state: State<DbState>,
+    limit: Option<i64>,
+) -> Result<Vec<TransaksiRingkas>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let limit_val = limit.unwrap_or(5);
+    let sql = format!(
+        "SELECT id, tipe, total, metode_bayar, tanggal FROM transaksi
+         UNION ALL
+         SELECT id, tipe, jumlah AS total, kategori AS metode_bayar, tanggal FROM kas WHERE tipe='pengeluaran'
+         ORDER BY tanggal DESC LIMIT {}",
+        limit_val
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(TransaksiRingkas {
+                id: row.get(0)?,
+                tipe: row.get(1)?,
+                total: row.get(2)?,
+                metode_bayar: row.get(3)?,
+                tanggal: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub fn get_ringkasan(
     state: State<DbState>,
@@ -50,7 +116,6 @@ pub fn get_ringkasan(
             |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
-
     let total_pembelian: i64 = conn
         .query_row(
             "SELECT COALESCE(SUM(total), 0) FROM transaksi WHERE tipe='pembelian' AND tanggal BETWEEN ?1 AND ?2",
@@ -58,16 +123,7 @@ pub fn get_ringkasan(
             |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
-
-    let total_pemasukan_kas: i64 = conn
-        .query_row(
-            "SELECT COALESCE(SUM(jumlah), 0) FROM kas WHERE tipe='pemasukan' AND tanggal BETWEEN ?1 AND ?2",
-            params![dari, sampai_with_time],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    let total_pengeluaran_kas: i64 = conn
+    let total_pengeluaran_manual: i64 = conn
         .query_row(
             "SELECT COALESCE(SUM(jumlah), 0) FROM kas WHERE tipe='pengeluaran' AND tanggal BETWEEN ?1 AND ?2",
             params![dari, sampai_with_time],
@@ -78,8 +134,8 @@ pub fn get_ringkasan(
     Ok(Ringkasan {
         total_penjualan,
         total_pembelian,
-        total_pemasukan_kas,
-        total_pengeluaran_kas,
+        total_pemasukan_kas: total_penjualan,
+        total_pengeluaran_kas: total_pembelian + total_pengeluaran_manual,
     })
 }
 
@@ -153,7 +209,7 @@ pub fn get_produk_terlaris(
     Ok(result)
 }
 
-/// Hitung total penjualan, modal, dan keuntungan untuk PDF laporan.
+/// Hitung total penjualan, modal, dan keuntungan.
 #[tauri::command]
 pub fn get_keuntungan_penjualan(
     state: State<DbState>,
@@ -163,19 +219,22 @@ pub fn get_keuntungan_penjualan(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let sampai_with_time = format!("{} 23:59:59", sampai);
 
-    // Profit = subtotal penjualan - harga_beli saat ini * qty.
-    // COALESCE menjaga PDF tetap bisa dibuat walau belum ada transaksi.
-    let (total_penjualan, total_modal): (i64, i64) = conn
+    let total_penjualan: i64 = conn
         .query_row(
-            "SELECT
-                COALESCE(SUM(ti.subtotal), 0) AS total_penjualan,
-                COALESCE(SUM(p.harga_beli * ti.qty), 0) AS total_modal
+            "SELECT COALESCE(SUM(total), 0) FROM transaksi WHERE tipe='penjualan' AND tanggal BETWEEN ?1 AND ?2",
+            params![dari, sampai_with_time],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let total_modal: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(p.harga_beli * ti.qty), 0)
              FROM transaksi_item ti
              JOIN transaksi t ON t.id = ti.transaksi_id
              JOIN produk p ON p.id = ti.produk_id
              WHERE t.tipe = 'penjualan' AND t.tanggal BETWEEN ?1 AND ?2",
             params![dari, sampai_with_time],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
 

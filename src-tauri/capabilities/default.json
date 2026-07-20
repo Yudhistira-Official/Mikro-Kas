@@ -6,10 +6,17 @@
   "permissions": [
     "core:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "whatsapp://*" }
+      ]
+    },
     "opener:allow-open-path",
     "dialog:default",
     "dialog:allow-save",
     "dialog:allow-open",
+    "fs:allow-read",
     "fs:default",
     {
       "identifier": "fs:allow-write-file",

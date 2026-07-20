@@ -1,5 +1,5 @@
 // Keuangan.jsx — Manajemen Keuangan Toko.
-// Catat pemasukan & pengeluaran harian UMKM.
+// Pemasukan otomatis dari penjualan; user hanya input pengeluaran manual.
 // Design ref: Stitch — Manajemen Keuangan.
 import { useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
@@ -18,14 +18,15 @@ export default function Keuangan() {
   const [list, setList] = useState([]);
   const [total, setTotal] = useState({ pemasukan: 0, pengeluaran: 0 });
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ tipe: "pemasukan", jumlah: "", kategori: "Penjualan", keterangan: "" });
+  const [form, setForm] = useState({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
   const [view, setView] = useState(() => localStorage.getItem("keuanganView") || "card");
 
   const load = () => {
     const dari = new Date(); dari.setDate(1);
     const sampai = new Date();
-    invoke("get_ringkasan_kas", { dari: dari.toISOString().slice(0, 10), sampai: sampai.toISOString().slice(0, 10) }).then(setTotal).catch(console.error);
-    invoke("list_kas").then(setList).catch(console.error);
+    const range = { dari: dari.toISOString().slice(0, 10), sampai: sampai.toISOString().slice(0, 10) };
+    invoke("get_ringkasan_kas", range).then(setTotal).catch(console.error);
+    invoke("list_kas", range).then(setList).catch(console.error);
   };
 
   // Guard: React 19 crash jika useEffect return Promise (bukan function).
@@ -41,7 +42,7 @@ export default function Keuangan() {
       });
       addToast("Catatan tersimpan", "success");
       setShowForm(false);
-      setForm({ tipe: "pemasukan", jumlah: "", kategori: "Penjualan", keterangan: "" });
+      setForm({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
       load();
     } catch (e) {
       addToast(`Gagal: ${e}`, "error");
@@ -114,9 +115,11 @@ export default function Keuangan() {
                 <span className="text-headline-sm" style={{ color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)", fontSize: "15px" }}>
                   {item.tipe === "pemasukan" ? "+" : "-"}{rupiah(item.jumlah)}
                 </span>
-                <button type="button" className="btn-icon" onClick={() => hapus(item.id)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
-                </button>
+                {item.tipe === "pengeluaran" && item.id > 0 && item.kategori !== "Retur Penjualan" && (
+                  <button type="button" className="btn-icon" onClick={() => hapus(item.id)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -142,9 +145,11 @@ export default function Keuangan() {
                 <span className="text-headline-sm" style={{ color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)", fontSize: "14px" }}>
                   {item.tipe === "pemasukan" ? "+" : "-"}{rupiah(item.jumlah)}
                 </span>
-                <button type="button" className="btn-icon" onClick={() => hapus(item.id)} title="Hapus">
-                  <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
-                </button>
+                {item.tipe === "pengeluaran" && item.id > 0 && item.kategori !== "Retur Penjualan" && (
+                  <button type="button" className="btn-icon" onClick={() => hapus(item.id)} title="Hapus">
+                    <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -169,16 +174,10 @@ export default function Keuangan() {
           background: "var(--color-surface)", borderRadius: "16px 16px 0 0", padding: "1.25rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px))",
           boxShadow: "0 -8px 24px rgba(0,0,0,0.08)",
         }}>
-          <p className="text-headline-md" style={{ marginBottom: "1rem" }}>Tambah Catatan Kas</p>
-
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
-            <button className={`filter-chip${form.tipe === "pemasukan" ? " active" : ""}`} onClick={() => setForm((prev) => ({ ...prev, tipe: "pemasukan" }))} style={{ background: form.tipe === "pemasukan" ? "rgba(16,185,129,0.12)" : undefined, color: form.tipe === "pemasukan" ? "var(--color-income-green)" : undefined }}>
-              Pemasukan
-            </button>
-            <button className={`filter-chip${form.tipe === "pengeluaran" ? " active" : ""}`} onClick={() => setForm((prev) => ({ ...prev, tipe: "pengeluaran" }))} style={{ background: form.tipe === "pengeluaran" ? "rgba(239,68,68,0.12)" : undefined, color: form.tipe === "pengeluaran" ? "var(--color-expense-red)" : undefined }}>
-              Pengeluaran
-            </button>
-          </div>
+          <p className="text-headline-md" style={{ marginBottom: "0.25rem" }}>Tambah Pengeluaran</p>
+          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
+            Pemasukan otomatis dari transaksi penjualan.
+          </p>
 
           <input className="input-field" inputMode="numeric" placeholder="Nominal" value={form.jumlah} onChange={(e) => setForm((prev) => ({ ...prev, jumlah: e.target.value.replace(/\D/g, "") }))} style={{ marginBottom: "0.75rem" }} />
 

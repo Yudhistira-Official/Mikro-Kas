@@ -5,6 +5,7 @@
 // Design ref: ui-references/nav-ref.html (Stitch)
 // ============================================================
 import { Outlet, NavLink, useLocation } from "react-router-dom";
+import LogoMark from "./LogoMark";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: "dashboard" },
@@ -21,7 +22,7 @@ export default function Layout() {
       {/* Top Header with safe-area for notch */}
       <header className="top-header">
         <NavLink to="/toko" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "8px" }}>
-          <span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>storefront</span>
+          <LogoMark size={38} />
           <span className="top-header-title">MikroKas</span>
         </NavLink>
         <NavLink to="/produk" style={{ textDecoration: "none", color: "var(--color-primary)" }}>
