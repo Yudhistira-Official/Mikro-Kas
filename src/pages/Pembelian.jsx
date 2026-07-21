@@ -27,6 +27,10 @@ export default function Pembelian() {
 
   // --- State data ---
   const [produk, setProduk] = useState([]);        // Daftar produk aktif
+  const [supplier, setSupplier] = useState([]);    // Daftar supplier untuk PO/restock.
+  const [supplierId, setSupplierId] = useState(""); // Supplier terpilih; kosong berarti pembelian umum.
+  const [dpNominal, setDpNominal] = useState(""); // DP dibayar ke supplier; sisa otomatis jadi hutang.
+  const [jatuhTempo, setJatuhTempo] = useState(""); // Due date hutang supplier.
   const [search, setSearch] = useState("");         // Filter pencarian produk
   const [cart, setCart] = useState([]);             // Item keranjang: [{produk_id, qty}]
   const [submitting, setSubmitting] = useState(false); // Flag disable tombol saat submit
@@ -48,10 +52,14 @@ export default function Pembelian() {
   const load = async () => {
     log("memuat data produk");
     try {
-      const data = await invoke("list_produk", { onlyActive: true });
+      const [dataProduk, dataSupplier] = await Promise.all([
+        invoke("list_produk", { onlyActive: true }),
+        invoke("list_supplier"),
+      ]);
       if (!cancelled) {
-        setProduk(data);
-        log(`data dimuat; produk=${data.length}`);
+        setProduk(dataProduk);
+        setSupplier(dataSupplier);
+        log(`data dimuat; produk=${dataProduk.length}; supplier=${dataSupplier.length}`);
       }
     } catch (e) {
       addToast(String(e), "error");
@@ -85,6 +93,9 @@ export default function Pembelian() {
     (sum, i) => sum + (produk.find((x) => x.id === i.produk_id)?.harga_beli || 0) * i.qty,
     0,
   );
+  // DP dibatasi maksimal total; sisa otomatis jadi hutang supplier jika supplier dipilih.
+  const dpValue = Math.min(total, Number(dpNominal || 0));
+  const sisaHutang = Math.max(0, total - dpValue);
 
   // -------------------------------------------------------
   // ADD — tambah produk ke keranjang (+1 qty).
@@ -122,9 +133,14 @@ export default function Pembelian() {
       await invoke("buat_transaksi_pembelian", {
         items: cart.map((i) => ({ produk_id: i.produk_id, qty: i.qty })),
         catatan: null,
+        supplierId: supplierId ? Number(supplierId) : null,
+        dpNominal: dpNominal === "" ? null : dpValue,
+        jatuhTempo: jatuhTempo || null,
       });
-      log(`checkout restock sukses; total=${total}`);
+      log(`checkout restock sukses; total=${total}; dp=${dpValue}; hutang=${sisaHutang}; supplier=${supplierId || "none"}`);
       setCart([]);
+      setDpNominal("");
+      setJatuhTempo("");
       load();
       addToast("Pembelian (restock) selesai", "success");
     } catch (e) {
@@ -148,8 +164,36 @@ export default function Pembelian() {
   // RENDER — UI restock: search bar, produk grid, cart footer.
   // -------------------------------------------------------
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", paddingBottom: cart.length ? "280px" : 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", paddingBottom: cart.length ? "330px" : 0 }}>
       <span className="text-headline-md">Restock Barang</span>
+
+      {/* Supplier & DP Setup */}
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem", background: "var(--color-surface-container-low)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div>
+            <label className="input-label">Pilih Supplier (Opsional)</label>
+            <select className="input-field" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">— Umum (Tanpa Supplier) —</option>
+              {supplier.map((s) => <option key={s.id} value={s.id}>{s.nama}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="input-label">Uang Muka (DP)</label>
+            <input className="input-field" inputMode="numeric" value={dpNominal} onChange={(e) => setDpNominal(e.target.value.replace(/\D/g, ""))} placeholder="Lunas (Default)" />
+          </div>
+        </div>
+        {supplierId && sisaHutang > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", alignItems: "center" }}>
+            <div>
+              <label className="input-label">Jatuh Tempo Hutang</label>
+              <input className="input-field" type="date" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} />
+            </div>
+            <div style={{ padding: "0.5rem", borderRadius: "8px", background: "rgba(245,158,11,0.1)", color: "var(--color-warning-amber)", fontSize: "12px", border: "1px solid rgba(245,158,11,0.2)" }}>
+              Sisa <b>{rupiah(sisaHutang)}</b> otomatis masuk ke daftar Hutang Supplier.
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Search bar + toggle view */}
       <div style={{ display: "flex", gap: 8 }}>
@@ -251,10 +295,14 @@ export default function Pembelian() {
               })}
             </div>
 
-            {/* Ringkasan total */}
+            {/* Ringkasan total + DP supplier */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginBottom: 12, fontSize: 15 }}>
               <span>Total Restock</span>
               <b style={{ textAlign: "right" }}>{rupiah(total)}</b>
+              <span>DP Dibayar</span>
+              <b style={{ textAlign: "right", color: "var(--color-income-green)" }}>{rupiah(dpValue)}</b>
+              <span>Sisa Hutang</span>
+              <b style={{ textAlign: "right", color: sisaHutang > 0 ? "var(--color-warning-amber)" : "var(--color-income-green)" }}>{rupiah(sisaHutang)}</b>
             </div>
 
             {/* Tombol submit — trigger checkout restock */}

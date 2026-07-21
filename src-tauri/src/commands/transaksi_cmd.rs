@@ -4,9 +4,17 @@ use crate::models::transaksi::{
     UpdatePenjualanInput,
 };
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tauri::State;
+
+/// Aturan satuan majemuk dari kolom produk.satuan_multi (JSON).
+#[derive(Debug, Deserialize)]
+struct SatuanRule {
+    satuan: String,
+    konversi: i64,
+    harga_jual: i64,
+}
 
 /// Baris laporan PDF: agregasi produk terjual per metode pembayaran dalam periode.
 /// ponytail: modal dihitung dari harga_beli produk SAAT INI, bukan historical snapshot.
@@ -19,6 +27,20 @@ pub struct LaporanProdukRow {
     pub total_harga: i64,
 }
 
+/// Baris laporan pembelian detail: restock supplier per item dan transaksi.
+/// Data ini dipakai UI/CSV agar owner bisa audit pembelian tanpa membuka satu-satu riwayat.
+#[derive(Debug, Serialize)]
+pub struct LaporanPembelianRow {
+    pub tanggal: String,
+    pub transaksi_id: i64,
+    pub supplier_nama: Option<String>,
+    pub produk_nama: String,
+    pub qty: i64,
+    pub harga_satuan: i64,
+    pub subtotal: i64,
+    pub catatan: Option<String>,
+}
+
 #[tauri::command]
 pub fn buat_transaksi_penjualan(
     state: State<DbState>,
@@ -27,6 +49,9 @@ pub fn buat_transaksi_penjualan(
     catatan: Option<String>,
     diskon_nominal: Option<i64>,
     customer_id: Option<i64>,
+    pajak_nominal: Option<i64>,
+    biaya_layanan: Option<i64>,
+    ongkir: Option<i64>,
 ) -> Result<TransaksiResult, String> {
     crate::logger::log(&format!(
         "COMMAND: buat_transaksi_penjualan dipanggil; items_count={}, metode_bayar={}",
@@ -40,22 +65,39 @@ pub fn buat_transaksi_penjualan(
     let mut item_rows = Vec::new();
 
     for item in &items {
-        // Ambil harga_jual dan stok dari DB
-        let (harga_jual, stok, nama) = tx
+        // Ambil harga aktif dari DB. Jika satuan pilihan dipakai, backend validasi dari JSON produk.
+        let (harga_base, stok, nama, satuan_multi): (i64, i64, String, Option<String>) = tx
             .query_row(
-                "SELECT harga_jual, stok, nama FROM produk WHERE id = ?1 AND is_active = 1",
+                "SELECT CASE
+                    WHEN COALESCE(harga_diskon,0) > 0
+                     AND (diskon_berlaku_sampai IS NULL OR diskon_berlaku_sampai >= date('now'))
+                    THEN harga_diskon ELSE harga_jual END,
+                    stok, nama, satuan_multi
+                 FROM produk WHERE id = ?1 AND is_active = 1",
                 params![item.produk_id],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|_| format!("Produk ID {} tidak ditemukan", item.produk_id))?;
 
-        if stok < item.qty {
+        let mut harga_jual = harga_base;
+        let mut qty_stok = item.qty;
+        if let Some(unit) = item.satuan_pilihan.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let rules: Vec<SatuanRule> = satuan_multi
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+                .unwrap_or_default();
+            let rule = rules
+                .into_iter()
+                .find(|r| r.satuan.eq_ignore_ascii_case(unit))
+                .ok_or_else(|| format!("Satuan {unit} tidak valid untuk {nama}"))?;
+            if rule.konversi <= 0 || rule.harga_jual <= 0 {
+                return Err(format!("Aturan satuan {unit} tidak valid"));
+            }
+            harga_jual = rule.harga_jual;
+            qty_stok = item.qty * rule.konversi;
+        }
+
+        if stok < qty_stok {
             return Err(format!("Stok {} tidak cukup (tersedia: {})", nama, stok));
         }
 
@@ -63,10 +105,10 @@ pub fn buat_transaksi_penjualan(
         total += subtotal;
         item_rows.push((item.produk_id, item.qty, harga_jual, subtotal));
 
-        // Kurangi stok
+        // Kurangi stok dasar: satuan besar dikonversi ke stok dasar produk.
         tx.execute(
             "UPDATE produk SET stok = stok - ?1, updated_at = datetime('now') WHERE id = ?2",
-            params![item.qty, item.produk_id],
+            params![qty_stok, item.produk_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -74,7 +116,11 @@ pub fn buat_transaksi_penjualan(
     // Diskon dan customer disimpan di catatan agar tidak mengubah skema transaksi lama.
     // ponytail: pindah ke kolom terpisah jika laporan per-customer/diskon jadi kebutuhan wajib.
     let diskon = diskon_nominal.unwrap_or(0).max(0).min(total);
-    let total_final = total - diskon;
+    // Biaya tambahan KasGo Phase 1: pajak, service charge, ongkir ditambahkan ke total final.
+    let pajak = pajak_nominal.unwrap_or(0).max(0);
+    let biaya = biaya_layanan.unwrap_or(0).max(0);
+    let ongkir_val = ongkir.unwrap_or(0).max(0);
+    let total_final = total - diskon + pajak + biaya + ongkir_val;
     let catatan_final = match (catatan, customer_id, diskon > 0) {
         (Some(c), Some(cid), true) => Some(format!("{c} | customer_id={cid} | diskon={diskon}")),
         (Some(c), Some(cid), false) => Some(format!("{c} | customer_id={cid}")),
@@ -87,8 +133,9 @@ pub fn buat_transaksi_penjualan(
     };
 
     tx.execute(
-        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan) VALUES ('penjualan', ?1, ?2, ?3)",
-        params![total_final, metode_bayar, catatan_final],
+        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, pajak_nominal, biaya_layanan, ongkir)
+         VALUES ('penjualan', ?1, ?2, ?3, ?4, ?5, ?6)",
+        params![total_final, metode_bayar, catatan_final, pajak, biaya, ongkir_val],
     )
     .map_err(|e| e.to_string())?;
     let transaksi_id: i64 = tx.last_insert_rowid();
@@ -105,7 +152,7 @@ pub fn buat_transaksi_penjualan(
     tx.commit().map_err(|e| e.to_string())?;
     Ok(TransaksiResult {
         transaksi_id,
-        total,
+        total: total_final,
     })
 }
 
@@ -114,6 +161,9 @@ pub fn buat_transaksi_pembelian(
     state: State<DbState>,
     items: Vec<ItemInput>,
     catatan: Option<String>,
+    supplier_id: Option<i64>,
+    dp_nominal: Option<i64>,
+    jatuh_tempo: Option<String>,
 ) -> Result<TransaksiResult, String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -141,12 +191,39 @@ pub fn buat_transaksi_pembelian(
         item_rows.push((item.produk_id, item.qty, harga_beli, subtotal, nama));
     }
 
+    // Pembelian supplier mendukung DP. Sisa otomatis menjadi hutang supplier.
+    let dp = dp_nominal.unwrap_or(total).max(0).min(total);
+    let sisa_hutang = total - dp;
+    let catatan_final = match (catatan, supplier_id, sisa_hutang > 0) {
+        (Some(c), Some(sid), true) => Some(format!("{c} | supplier_id={sid} | dp={dp} | hutang={sisa_hutang}")),
+        (Some(c), Some(sid), false) => Some(format!("{c} | supplier_id={sid} | dp={dp}")),
+        (Some(c), None, true) => Some(format!("{c} | dp={dp} | hutang={sisa_hutang}")),
+        (Some(c), None, false) => Some(c),
+        (None, Some(sid), true) => Some(format!("supplier_id={sid} | dp={dp} | hutang={sisa_hutang}")),
+        (None, Some(sid), false) => Some(format!("supplier_id={sid} | dp={dp}")),
+        (None, None, true) => Some(format!("dp={dp} | hutang={sisa_hutang}")),
+        (None, None, false) => None,
+    };
+
     tx.execute(
-        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan) VALUES ('pembelian', ?1, 'tunai', ?2)",
-        params![total, catatan],
+        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, supplier_id)
+         VALUES ('pembelian', ?1, 'tunai', ?2, ?3)",
+        params![total, catatan_final, supplier_id],
     )
     .map_err(|e| e.to_string())?;
     let transaksi_id: i64 = tx.last_insert_rowid();
+
+    if let Some(sid) = supplier_id {
+        if sisa_hutang > 0 {
+            // Auto-hutang memakai tabel existing agar pembayaran supplier tetap di halaman Hutang & Piutang.
+            tx.execute(
+                "INSERT INTO hutang_piutang (tipe, kontak_id, kontak_tipe, jumlah, jumlah_bayar, keterangan, tanggal, jatuh_tempo)
+                 VALUES ('hutang', ?1, 'supplier', ?2, 0, ?3, datetime('now'), ?4)",
+                params![sid, sisa_hutang, format!("Sisa pembelian #{transaksi_id}"), jatuh_tempo],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
 
     for (produk_id, qty, harga, subtotal, _nama) in item_rows {
         tx.execute(
@@ -181,28 +258,38 @@ pub fn list_transaksi(
 ) -> Result<Vec<Transaksi>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut sql = String::from(
-        "SELECT id, tipe, total, metode_bayar, catatan, tanggal, created_at FROM transaksi WHERE 1=1",
+        "WITH RankedTransaksi AS ( \
+           SELECT id, ROW_NUMBER() OVER (PARTITION BY strftime('%Y-%m', tanggal) ORDER BY id ASC) as no_nota \
+           FROM transaksi \
+         ) \
+         SELECT t.id, t.tipe, t.total, t.metode_bayar, t.catatan, t.tanggal, t.created_at, \
+         COALESCE(t.pajak_nominal,0), COALESCE(t.biaya_layanan,0), COALESCE(t.ongkir,0), \
+         t.supplier_id, s.nama, r.no_nota \
+         FROM transaksi t \
+         LEFT JOIN supplier s ON s.id = t.supplier_id \
+         JOIN RankedTransaksi r ON r.id = t.id \
+         WHERE 1=1",
     );
     let mut params_list: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 0;
 
     if let Some(ref t) = tipe {
         idx += 1;
-        sql.push_str(&format!(" AND tipe = ?{}", idx));
+        sql.push_str(&format!(" AND t.tipe = ?{}", idx));
         params_list.push(Box::new(t.clone()));
     }
     if let Some(ref d) = dari_tanggal {
         idx += 1;
-        sql.push_str(&format!(" AND tanggal >= ?{}", idx));
+        sql.push_str(&format!(" AND t.tanggal >= ?{}", idx));
         params_list.push(Box::new(d.clone()));
     }
     if let Some(ref d) = sampai_tanggal {
         idx += 1;
-        sql.push_str(&format!(" AND tanggal <= ?{}", idx));
+        sql.push_str(&format!(" AND t.tanggal <= ?{}", idx));
         params_list.push(Box::new(format!("{} 23:59:59", d)));
     }
 
-    sql.push_str(" ORDER BY tanggal DESC, id DESC");
+    sql.push_str(" ORDER BY t.tanggal DESC, t.id DESC");
 
     let limit = limit.unwrap_or(50);
     sql.push_str(&format!(" LIMIT {}", limit));
@@ -223,6 +310,12 @@ pub fn list_transaksi(
                 catatan: row.get(4)?,
                 tanggal: row.get(5)?,
                 created_at: row.get(6)?,
+                pajak_nominal: row.get(7).unwrap_or(0),
+                biaya_layanan: row.get(8).unwrap_or(0),
+                ongkir: row.get(9).unwrap_or(0),
+                supplier_id: row.get(10)?,
+                supplier_nama: row.get(11)?,
+                no_nota: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -286,8 +379,17 @@ pub fn get_transaksi_detail(state: State<DbState>, id: i64) -> Result<TransaksiD
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let header = conn
         .query_row(
-            "SELECT id, tipe, total, metode_bayar, catatan, tanggal, created_at
-             FROM transaksi WHERE id = ?1",
+            "WITH RankedTransaksi AS ( \
+               SELECT id, ROW_NUMBER() OVER (PARTITION BY strftime('%Y-%m', tanggal) ORDER BY id ASC) as no_nota \
+               FROM transaksi \
+             ) \
+             SELECT t.id, t.tipe, t.total, t.metode_bayar, t.catatan, t.tanggal, t.created_at, \
+             COALESCE(t.pajak_nominal,0), COALESCE(t.biaya_layanan,0), COALESCE(t.ongkir,0), \
+             t.supplier_id, s.nama, r.no_nota \
+             FROM transaksi t \
+             LEFT JOIN supplier s ON s.id = t.supplier_id \
+             JOIN RankedTransaksi r ON r.id = t.id \
+             WHERE t.id = ?1",
             params![id],
             |row| {
                 Ok(Transaksi {
@@ -298,6 +400,12 @@ pub fn get_transaksi_detail(state: State<DbState>, id: i64) -> Result<TransaksiD
                     catatan: row.get(4)?,
                     tanggal: row.get(5)?,
                     created_at: row.get(6)?,
+                    pajak_nominal: row.get(7).unwrap_or(0),
+                    biaya_layanan: row.get(8).unwrap_or(0),
+                    ongkir: row.get(9).unwrap_or(0),
+                    supplier_id: row.get(10)?,
+                    supplier_nama: row.get(11)?,
+                    no_nota: row.get(12)?,
                 })
             },
         )
@@ -702,4 +810,45 @@ fn insert_retur_items(tx: &rusqlite::Transaction<'_>, retur_id: i64, items: &[It
         ).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Laporan pembelian detail per item untuk audit restock supplier dan export CSV.
+#[tauri::command]
+pub fn list_laporan_pembelian_detail(
+    state: State<DbState>,
+    dari: String,
+    sampai: String,
+) -> Result<Vec<LaporanPembelianRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let sampai_with_time = format!("{} 23:59:59", sampai);
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.tanggal, t.id, s.nama, p.nama, ti.qty, ti.harga_satuan, ti.subtotal, t.catatan
+             FROM transaksi_item ti
+             JOIN transaksi t ON t.id = ti.transaksi_id
+             JOIN produk p ON p.id = ti.produk_id
+             LEFT JOIN supplier s ON s.id = t.supplier_id
+             WHERE t.tipe = 'pembelian' AND t.tanggal BETWEEN ?1 AND ?2
+             ORDER BY t.tanggal DESC, ti.id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![dari, sampai_with_time], |row| {
+            Ok(LaporanPembelianRow {
+                tanggal: row.get(0)?,
+                transaksi_id: row.get(1)?,
+                supplier_nama: row.get(2)?,
+                produk_nama: row.get(3)?,
+                qty: row.get(4)?,
+                harga_satuan: row.get(5)?,
+                subtotal: row.get(6)?,
+                catatan: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
 }

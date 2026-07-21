@@ -8,6 +8,7 @@ pub struct Customer {
     pub telepon: Option<String>,
     pub alamat: Option<String>,
     pub deskripsi_tambahan: Option<String>,
+    pub limit_kredit: i64,
     pub created_at: String,
 }
 
@@ -17,4 +18,5 @@ pub struct CustomerInput {
     pub telepon: Option<String>,
     pub alamat: Option<String>,
     pub deskripsi_tambahan: Option<String>,
+    pub limit_kredit: Option<i64>,
 }

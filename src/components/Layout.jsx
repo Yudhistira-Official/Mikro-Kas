@@ -53,7 +53,7 @@ export default function Layout() {
         </NavLink>
       </header>
 
-      <main onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ maxWidth: "480px", margin: "0 auto", padding: "1rem", touchAction: "pan-y" }}>
+      <main onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{ maxWidth: "480px", margin: "0 auto", padding: "1rem", touchAction: "pan-y", overflowX: "hidden" }}>
         <Outlet />
       </main>
 

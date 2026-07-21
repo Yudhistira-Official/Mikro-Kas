@@ -35,6 +35,12 @@ import HutangPiutang from "./pages/HutangPiutang";
 import Cashbox from "./pages/Cashbox";
 import Retur from "./pages/Retur";
 import BackupRestore from "./pages/BackupRestore";
+import RiwayatStok from "./pages/RiwayatStok";
+import StockOpname from "./pages/StockOpname";
+import Promo from "./pages/Promo";
+import Pesanan from "./pages/Pesanan";
+import RiwayatPembelian from "./pages/RiwayatPembelian";
+import Shift from "./pages/Shift";
 
 // ============================================================
 // Logger JS → Rust (fire-and-forget, tidak throw).
@@ -169,6 +175,7 @@ function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/keuangan" element={<Keuangan />} />
           <Route path="/pembelian" element={<Pembelian />} />
+          <Route path="/riwayat-pembelian" element={<RiwayatPembelian />} />
           <Route path="/riwayat" element={<Riwayat />} />
           <Route path="/laporan" element={<Laporan />} />
           <Route path="/log" element={<Log />} />
@@ -177,7 +184,12 @@ function App() {
           <Route path="/hutang-piutang" element={<HutangPiutang />} />
           <Route path="/cashbox" element={<Cashbox />} />
           <Route path="/retur" element={<Retur />} />
+          <Route path="/promo" element={<Promo />} />
+          <Route path="/pesanan" element={<Pesanan />} />
           <Route path="/backup-restore" element={<BackupRestore />} />
+          <Route path="/riwayat-stok" element={<RiwayatStok />} />
+          <Route path="/shift" element={<Shift />} />
+          <Route path="/stock-opname" element={<StockOpname />} />
           <Route path="/toko" element={<TokoSetup />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

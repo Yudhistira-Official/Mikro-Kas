@@ -4,6 +4,7 @@
 // Semua perubahan stok dihitung ulang atomik oleh Rust, bukan oleh frontend.
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 
@@ -13,6 +14,7 @@ const isEditable = (date) => Date.now() - new Date(`${date.replace(" ", "T")}Z`)
 
 export default function Riwayat() {
   const { addToast } = useToast();
+  const navigate = useNavigate();
   const [dari, setDari] = useState(today);
   const [sampai, setSampai] = useState(today);
   const [list, setList] = useState([]);
@@ -20,16 +22,19 @@ export default function Riwayat() {
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
+  const [toko, setToko] = useState(null);
 
   // Satu loader sinkron untuk useEffect; callback async tidak pernah menjadi cleanup React.
   const load = useCallback(async () => {
     try {
-      const [sales, products] = await Promise.all([
+      const [sales, products, tokoData] = await Promise.all([
         invoke("list_transaksi", { tipe: "penjualan", dariTanggal: dari, sampaiTanggal: sampai, limit: 100 }),
         invoke("list_produk", { onlyActive: true }),
+        invoke("get_toko").catch(() => null),
       ]);
       setList(sales);
       setProduk(products);
+      setToko(tokoData);
     } catch (e) { addToast(`Gagal memuat riwayat: ${e}`, "error"); }
   }, [addToast, dari, sampai]);
 
@@ -88,8 +93,70 @@ export default function Riwayat() {
     finally { setSaving(false); }
   };
 
+  const reorderSale = () => {
+    if (!detail?.items?.length) return;
+    // Pesan Lagi hanya menyalin item ke kasir; harga/stok/biaya dihitung ulang saat checkout baru.
+    const reorderItems = detail.items.map((item) => ({ produk_id: item.produk_id, qty: item.qty }));
+    navigate("/transaksi", { state: { reorderItems } });
+  };
+
+  const formatReceiptText = () => {
+    if (!detail) return "";
+    // Struk teks sederhana: aman offline, bisa dicetak lewat aplikasi printer/share sheet.
+    const lines = [
+      toko?.nama_toko || "MikroKas",
+      "STRUK PEMBAYARAN",
+      "-".repeat(32),
+      `No: #${detail.header.no_nota || detail.header.id}`,
+      `Tanggal: ${detail.header.tanggal.slice(0, 16)}`,
+      `Metode: ${detail.header.metode_bayar}`,
+      "-".repeat(32),
+      ...detail.items.flatMap((item) => [
+        item.produk_nama,
+        `${item.qty} x ${rupiah(item.harga_satuan)} = ${rupiah(item.qty * item.harga_satuan)}`,
+      ]),
+      "-".repeat(32),
+    ];
+    if (detail.header.pajak_nominal) lines.push(`Pajak: ${rupiah(detail.header.pajak_nominal)}`);
+    if (detail.header.biaya_layanan) lines.push(`Biaya layanan: ${rupiah(detail.header.biaya_layanan)}`);
+    if (detail.header.ongkir) lines.push(`Ongkir: ${rupiah(detail.header.ongkir)}`);
+    lines.push(`TOTAL: ${rupiah(estimatedTotal + (detail.header.pajak_nominal || 0) + (detail.header.biaya_layanan || 0) + (detail.header.ongkir || 0))}`);
+    lines.push("-".repeat(32), "Terima kasih", "Dicetak dari MikroKas");
+    return lines.join("\n");
+  };
+
+  const shareReceipt = async () => {
+    const text = formatReceiptText();
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Struk MikroKas #${detail.header.id}`, text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        addToast("Struk disalin ke clipboard", "success");
+      }
+    } catch (e) {
+      try {
+        await navigator.clipboard.writeText(text);
+        addToast("Share gagal; struk disalin ke clipboard", "success");
+      } catch {
+        addToast(`Gagal bagikan struk: ${e}`, "error");
+      }
+    }
+  };
+
   const matchingProduk = produk.filter((p) => query.trim() && p.nama.toLowerCase().includes(query.toLowerCase()) && !detail?.items.some((item) => item.produk_id === p.id)).slice(0, 5);
   const estimatedTotal = detail?.items.reduce((sum, item) => sum + item.qty * item.harga_satuan, 0) || 0;
+
+  const getModalTrans = (items) => {
+    return items.reduce((sum, item) => {
+      const prod = produk.find((p) => p.id === item.produk_id);
+      const hBeli = prod ? prod.harga_beli : item.harga_satuan * 0.7; // default 70% if inactive/missing
+      return sum + hBeli * item.qty;
+    }, 0);
+  };
+
+  const currentModal = detail ? getModalTrans(detail.items) : 0;
+  const currentProfit = estimatedTotal - currentModal;
 
   return <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
     <span className="text-headline-md">Riwayat Penjualan</span>
@@ -99,13 +166,25 @@ export default function Riwayat() {
     </div>
     {list.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">receipt_long</span><p>Tidak ada penjualan di rentang ini</p></div>
       : list.map((t) => <button key={t.id} className="card" type="button" style={{ cursor: "pointer", textAlign: "left", padding: "0.75rem", border: "1px solid var(--color-surface-border)" }} onClick={() => openEditor(t.id)}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}><span className="text-body-md" style={{ fontWeight: 700 }}>Penjualan #{t.id}</span><span className="chip chip-green">{t.metode_bayar}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}><span className="text-body-md" style={{ fontWeight: 700 }}>Penjualan #{t.no_nota || t.id}</span><span className="chip chip-green">{t.metode_bayar}</span></div>
         <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{t.tanggal.slice(0, 16)}</p>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span className="text-headline-sm" style={{ color: "var(--color-income-green)" }}>+{rupiah(t.total)}</span><span className="text-label-md" style={{ color: isEditable(t.created_at) ? "var(--color-primary)" : "var(--color-text-secondary)" }}>{isEditable(t.created_at) ? "Ketuk untuk edit" : "Terkunci (>2 hari)"}</span></div>
       </button>)}
 
     {detail && <div className="modal-overlay" onClick={() => !saving && setDetail(null)}><div className="modal-content" style={{ maxHeight: "90vh", overflowY: "auto", paddingBottom: "1rem" }} onClick={(e) => e.stopPropagation()}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}><div><h3 className="text-headline-md">Edit Penjualan #{detail.header.id}</h3><p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{detail.header.tanggal.slice(0, 16)}</p></div><button className="btn-icon" disabled={saving} onClick={() => setDetail(null)}><span className="material-symbols-outlined">close</span></button></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}><div><h3 className="text-headline-md">Edit Penjualan #{detail.header.no_nota || detail.header.id}</h3><p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{detail.header.tanggal.slice(0, 16)}</p></div><button className="btn-icon" disabled={saving} onClick={() => setDetail(null)}><span className="material-symbols-outlined">close</span></button></div>
+
+      {/* Profit per transaksi — modal dari harga_beli produk saat ini */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginTop: "0.75rem" }}>
+        <div className="card" style={{ textAlign: "center", padding: "0.5rem", background: "var(--color-surface-container-high)", borderRadius: "10px" }}>
+          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", fontSize: "10px" }}>Modal</p>
+          <p className="text-body-md" style={{ fontWeight: 700, marginTop: "2px" }}>{rupiah(currentModal)}</p>
+        </div>
+        <div className="card" style={{ textAlign: "center", padding: "0.5rem", background: "var(--color-surface-container-high)", borderRadius: "10px" }}>
+          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", fontSize: "10px" }}>Estimasi Total Jual</p>
+          <p className="text-body-md" style={{ fontWeight: 700, marginTop: "2px" }}>{rupiah(estimatedTotal)}</p>
+        </div>
+      </div>
       {!isEditable(detail.header.created_at) ? <p className="text-body-md" style={{ color: "var(--color-expense-red)", marginTop: "1rem" }}>Transaksi lebih dari 2 hari hanya dapat dilihat.</p> : <>
         <p className="text-label-md" style={{ color: "var(--color-warning-amber)", margin: "0.75rem 0" }}>Peringatan: perubahan akan menghitung ulang stok secara otomatis.</p>
         {detail.items.map((item) => <div key={item.id} style={{ display: "flex", gap: "0.5rem", alignItems: "center", padding: "0.6rem 0", borderBottom: "1px solid var(--color-surface-border)" }}>
@@ -114,6 +193,10 @@ export default function Riwayat() {
         </div>)}
         <div style={{ position: "relative", marginTop: "0.75rem" }}><label className="input-label">Tambah Produk</label><input className="input-field" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari produk..." />{matchingProduk.length > 0 && <div className="card" style={{ position: "absolute", zIndex: 2, left: 0, right: 0, padding: 0, overflow: "hidden" }}>{matchingProduk.map((p) => <button key={p.id} type="button" onClick={() => addProduct(p)} style={{ display: "flex", justifyContent: "space-between", width: "100%", padding: "0.7rem", border: 0, borderBottom: "1px solid var(--color-surface-border)", background: "var(--color-surface)" }}><span>{p.nama}</span><span>{rupiah(p.harga_jual)}</span></button>)}</div>}</div>
         <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, margin: "1rem 0" }}><span>Estimasi Total</span><span>{rupiah(estimatedTotal)}</span></div>
+        <button className="btn-secondary" disabled={saving} onClick={shareReceipt} style={{ width: "100%", marginBottom: "0.5rem" }}>
+          Bagikan Struk Teks
+        </button>
+        <button className="btn-secondary" disabled={saving} onClick={reorderSale} style={{ width: "100%", marginBottom: "0.5rem" }}>Pesan Lagi ke Kasir</button>
         <button className="btn-secondary" disabled={saving} onClick={deleteSale} style={{ width: "100%", color: "var(--color-expense-red)", borderColor: "var(--color-expense-red)", marginBottom: "0.5rem" }}>Hapus Seluruh Transaksi</button><button className="btn-primary" disabled={saving} onClick={saveEdit} style={{ width: "100%" }}>{saving ? "Menyimpan..." : "Simpan Perubahan"}</button>
       </>}
     </div></div>}

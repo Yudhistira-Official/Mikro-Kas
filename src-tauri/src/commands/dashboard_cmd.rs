@@ -1,10 +1,44 @@
-//! Command dashboard terintegrasi transaksi + kas.
-//!
-//! Sumber kebenaran:
-//!   - Penjualan/pemasukan: tabel transaksi tipe='penjualan'.
-//!   - Pembelian/restock: tabel transaksi tipe='pembelian'.
-//!   - Pengeluaran manual + retur: tabel kas tipe='pengeluaran'.
-//! Retur sudah mengurangi transaksi penjualan dan menambah kas pengeluaran.
+/// Total retur/refund dalam rentang tanggal untuk executive summary.
+#[derive(Debug, Serialize)]
+pub struct ReturSummary {
+    pub total_retur: i64,
+    pub jumlah_retur: i64,
+}
+
+#[tauri::command]
+pub fn get_total_retur(
+    state: State<DbState>,
+    dari: String,
+    sampai: String,
+) -> Result<ReturSummary, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let sampai_with_time = format!("{} 23:59:59", sampai);
+    let total_retur: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(total_refund), 0) FROM retur WHERE created_at BETWEEN ?1 AND ?2",
+            params![dari, sampai_with_time],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let jumlah_retur: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM retur WHERE created_at BETWEEN ?1 AND ?2",
+            params![dari, sampai_with_time],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(ReturSummary {
+        total_retur,
+        jumlah_retur,
+    })
+}
+
+// Command dashboard terintegrasi transaksi + kas.
+// Sumber kebenaran:
+//   - Penjualan/pemasukan: tabel transaksi tipe='penjualan'.
+//   - Pembelian/restock: tabel transaksi tipe='pembelian'.
+//   - Pengeluaran manual + retur: tabel kas tipe='pengeluaran'.
+// Retur sudah mengurangi transaksi penjualan dan menambah kas pengeluaran.
 use crate::db::DbState;
 use rusqlite::params;
 use serde::Serialize;
@@ -243,4 +277,67 @@ pub fn get_keuntungan_penjualan(
         total_modal,
         total_keuntungan: total_penjualan - total_modal,
     })
+}
+
+// ============================================================
+// Gap KasGo Phase 1: Profit per Transaksi
+// ============================================================
+
+/// Data profit per transaksi penjualan.
+/// Modal dihitung dari harga_beli produk SAAT INI (bukan historical snapshot).
+/// ponytail: upgrade path — tambah kolom harga_beli_saat_transaksi di transaksi_item.
+#[derive(Debug, Serialize)]
+pub struct KeuntunganPerTransaksi {
+    pub transaksi_id: i64,
+    pub tanggal: String,
+    pub metode_bayar: String,
+    pub total: i64,
+    pub total_modal: i64,
+    pub keuntungan: i64,
+    pub jumlah_item: i64,
+}
+
+/// Daftar keuntungan per transaksi penjualan dalam rentang tanggal.
+/// Diurutkan dari yang terbaru. Hanya transaksi tipe penjualan.
+#[tauri::command]
+pub fn list_keuntungan_per_transaksi(
+    state: State<DbState>,
+    dari: String,
+    sampai: String,
+) -> Result<Vec<KeuntunganPerTransaksi>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let sampai_with_time = format!("{} 23:59:59", sampai);
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.id, t.tanggal, t.metode_bayar, t.total,
+                    COALESCE(SUM(p.harga_beli * ti.qty), 0) AS total_modal,
+                    COUNT(ti.id) AS jumlah_item
+             FROM transaksi t
+             LEFT JOIN transaksi_item ti ON ti.transaksi_id = t.id
+             LEFT JOIN produk p ON p.id = ti.produk_id
+             WHERE t.tipe = 'penjualan' AND t.tanggal BETWEEN ?1 AND ?2
+             GROUP BY t.id
+             ORDER BY t.tanggal DESC, t.id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![dari, sampai_with_time], |row| {
+            let total: i64 = row.get(3)?;
+            let total_modal: i64 = row.get(4)?;
+            Ok(KeuntunganPerTransaksi {
+                transaksi_id: row.get(0)?,
+                tanggal: row.get(1)?,
+                metode_bayar: row.get(2)?,
+                total,
+                total_modal,
+                keuntungan: total - total_modal,
+                jumlah_item: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
 }

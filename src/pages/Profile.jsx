@@ -9,8 +9,11 @@
 //   - Versi aplikasi di bawah.
 // Design ref: Stitch — "Profil & Fitur MikroKas" (Kinetic Ledger).
 // ============================================================
+import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import LogoMark from "../components/LogoMark";
+import { invoke } from "../utils/ipc";
+import { useToast } from "../hooks/useToast";
 
 // Empat fitur utama yang paling sering dipakai.
 const mainItems = [
@@ -22,10 +25,16 @@ const mainItems = [
 
 // Menu pendukung lainnya.
 const secondaryItems = [
-  { path: "/pembelian", label: "Pembelian (Restock)", icon: "add_shopping_cart" },
+  { path: "/pembelian", label: "Pembelian", icon: "add_shopping_cart" },
+  { path: "/riwayat-pembelian", label: "Riwayat Pembelian", icon: "local_shipping" },
   { path: "/riwayat", label: "Riwayat Penjualan", icon: "receipt_long" },
   { path: "/retur", label: "Retur Penjualan", icon: "assignment_return" },
+  { path: "/promo", label: "Promo & Marketing", icon: "sell" },
+  { path: "/riwayat-stok", label: "Riwayat Audit Stok", icon: "inventory" },
+  { path: "/stock-opname", label: "Stock Opname", icon: "checklist" },
+  { path: "/shift", label: "Shift Management", icon: "schedule" },
   { path: "/customer", label: "Customer", icon: "group" },
+  { path: "/pesanan", label: "Pesanan Pelanggan", icon: "assignment" },
   { path: "/supplier", label: "Supplier", icon: "local_shipping" },
   { path: "/hutang-piutang", label: "Hutang & Piutang", icon: "payments" },
   { path: "/cashbox", label: "Cashbox", icon: "account_balance_wallet" },
@@ -53,7 +62,7 @@ const iconWrap = {
   width: "40px",
   height: "40px",
   borderRadius: "10px",
-  background: "#1a3757",
+  background: "linear-gradient(135deg, #7C3AED, #A78BFA)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -77,7 +86,7 @@ const secondaryIcon = {
   width: "32px",
   height: "32px",
   borderRadius: "8px",
-  background: "#1a3757",
+  background: "linear-gradient(135deg, #7C3AED, #A78BFA)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -86,6 +95,46 @@ const secondaryIcon = {
 };
 
 export default function Profile() {
+  const { addToast } = useToast();
+  const [pins, setPins] = useState([]);
+  const [newPin, setNewPin] = useState("");
+  const [showPinInput, setShowPinInput] = useState(false);
+
+  // Load PIN list saat mount
+  useEffect(() => {
+    invoke("list_kasir_pins")
+      .then(setPins)
+      .catch(() => {});
+  }, []);
+
+  const handleSetPin = async () => {
+    if (newPin.length < 4 || newPin.length > 6) {
+      addToast("PIN harus 4-6 digit", "error");
+      return;
+    }
+    try {
+      await invoke("set_kasir_pin", { pin: newPin, role: "kasir" });
+      addToast("PIN kasir berhasil disimpan", "success");
+      setNewPin("");
+      setShowPinInput(false);
+      const updated = await invoke("list_kasir_pins");
+      setPins(updated);
+    } catch (e) {
+      addToast(`Gagal simpan PIN: ${e}`, "error");
+    }
+  };
+
+  const handleDeletePin = async (id) => {
+    try {
+      await invoke("delete_kasir_pin", { id });
+      addToast("PIN kasir dihapus", "success");
+      const updated = await invoke("list_kasir_pins");
+      setPins(updated);
+    } catch (e) {
+      addToast(`Gagal hapus PIN: ${e}`, "error");
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       {/* Header toko */}
@@ -126,6 +175,48 @@ export default function Profile() {
             </NavLink>
           ))}
         </div>
+      </div>
+
+      {/* PIN Kasir Management */}
+      <div className="card" style={{ padding: "1.25rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "1rem" }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--color-primary)", fontSize: "20px" }}>lock</span>
+          <p className="text-headline-sm" style={{ fontSize: "16px", fontWeight: 600 }}>PIN Kasir</p>
+        </div>
+        <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginBottom: "1rem", fontSize: "13px" }}>
+          {pins.length > 0 ? "PIN aktif untuk keamanan kasir" : "Belum ada PIN diatur"}
+        </p>
+        {pins.length > 0 && (
+          <div style={{ marginBottom: "1rem" }}>
+            {pins.map((p) => (
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--color-surface-container)", borderRadius: "8px", marginBottom: "8px" }}>
+                <span className="text-body-md" style={{ fontSize: "14px" }}>PIN {p.role}</span>
+                <button onClick={() => handleDeletePin(p.id)} className="btn-secondary" style={{ padding: "4px 12px", fontSize: "12px", color: "var(--color-expense-red)" }}>Hapus</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {showPinInput ? (
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              value={newPin}
+              onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
+              placeholder="4-6 digit PIN"
+              className="input-field"
+              style={{ flex: 1 }}
+              autoFocus
+            />
+            <button onClick={handleSetPin} className="btn-primary" style={{ padding: "8px 16px" }}>Simpan</button>
+            <button onClick={() => { setShowPinInput(false); setNewPin(""); }} className="btn-secondary" style={{ padding: "8px 12px" }}>Batal</button>
+          </div>
+        ) : (
+          <button onClick={() => setShowPinInput(true)} className="btn-primary" style={{ width: "100%", padding: "10px" }}>
+            {pins.length > 0 ? "Ubah PIN" : "Atur PIN Kasir"}
+          </button>
+        )}
       </div>
 
       {/* Versi */}

@@ -13,6 +13,7 @@ pub struct HutangPiutang {
     pub status: String,
     pub tanggal: String,
     pub created_at: String,
+    pub jatuh_tempo: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +24,7 @@ pub struct HutangPiutangInput {
     pub jumlah: i64,
     pub keterangan: Option<String>,
     pub tanggal: Option<String>,
+    pub jatuh_tempo: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -6,9 +6,11 @@
 
 pub mod cashbox;
 pub mod customer;
+pub mod harga_supplier;
 pub mod hutang_piutang;
 pub mod kas;
 pub mod kategori;
+pub mod pesanan;
 pub mod produk;
 pub mod qris_profile;
 pub mod supplier;

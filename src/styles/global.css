@@ -1,29 +1,30 @@
 /* ============================================================
    MikroKas — Global Styles (design system dari Stitch)
-   Color palette: Elegant Blue, clean white surfaces, Inter font
-   Mobile-first, card-based layout
+   Color palette: MikroKas Colorful UMKM POS — VIBRANT
+   Primary violet, secondary cyan, tertiary amber, clean white surfaces.
+   Mobile-first, card-based layout.
    ============================================================ */
 
 :root {
-  /* Primary */
-  --color-primary: #002045;
-  --color-primary-container: #1a365d;
+  /* Primary — Violet vibrant (Stitch #7C3AED) */
+  --color-primary: #7C3AED;
+  --color-primary-container: #5B21B6;
   --color-on-primary: #ffffff;
-  --color-on-primary-container: #86a0cd;
-  --color-primary-fixed: #d6e3ff;
-  --color-primary-fixed-dim: #adc7f7;
+  --color-on-primary-container: #E9D5FF;
+  --color-primary-fixed: #EDE9FE;
+  --color-primary-fixed-dim: #C4B5FD;
 
-  /* Surface */
-  --color-surface: #faf9fd;
-  --color-surface-dim: #dad9dd;
-  --color-surface-bright: #faf9fd;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f4f3f7;
-  --color-surface-container: #efedf1;
-  --color-surface-container-high: #e9e7eb;
-  --color-surface-container-highest: #e3e2e6;
+  /* Surface — clean white with subtle tint */
+  --color-surface: #F8FAFC;
+  --color-surface-dim: #E2E8F0;
+  --color-surface-bright: #FFFFFF;
+  --color-surface-container-lowest: #FFFFFF;
+  --color-surface-container-low: #F1F5F9;
+  --color-surface-container: #F8FAFC;
+  --color-surface-container-high: #E2E8F0;
+  --color-surface-container-highest: #CBD5E1;
   --color-surface-border: #E2E8F0;
-  --color-surface-variant: #e3e2e6;
+  --color-surface-variant: #E2E8F0;
 
   /* Text */
   --color-text-primary: #0F172A;
@@ -33,12 +34,17 @@
   --color-outline: #74777f;
   --color-outline-variant: #c4c6cf;
 
-  /* Semantic */
+  /* Semantic — warna hidup untuk POS */
   --color-income-green: #10B981;
   --color-expense-red: #EF4444;
   --color-warning-amber: #F59E0B;
   --color-error: #ba1a1a;
   --color-error-container: #ffdad6;
+
+  /* Aksen tambahan dari Stitch design system */
+  --color-secondary-cyan: #06B6D4;
+  --color-tertiary-amber: #F59E0B;
+  --color-accent-gradient: linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%);
 
   /* Typography */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -141,10 +147,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background: var(--color-primary);
+  background: var(--color-accent-gradient);
   color: var(--color-on-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 10px 24px;
   font-family: var(--font-family);
   font-size: 16px;

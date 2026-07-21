@@ -31,6 +31,10 @@ export default function Supplier() {
   const [editItem, setEditItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null); // supplier yg dilihat di modal detail
   const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
+  // Catatan Harga Supplier
+  const [hargaList, setHargaList] = useState([]);
+  const [produkAll, setProdukAll] = useState([]);
+  const [hargaForm, setHargaForm] = useState({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
 
   // -------------------------------------------------------
   // LOAD — ambil semua supplier dari backend.
@@ -44,6 +48,62 @@ export default function Supplier() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Load produk untuk dropdown catatan harga
+  useEffect(() => {
+    invoke("list_produk", { onlyActive: true })
+      .then(setProdukAll)
+      .catch(() => {});
+  }, []);
+
+  // Load catatan harga ketika detailItem berubah
+  useEffect(() => {
+    if (detailItem?.id) {
+      invoke("list_catatan_harga_supplier", { supplier_id: detailItem.id })
+        .then(setHargaList)
+        .catch(() => setHargaList([]));
+    } else {
+      setHargaList([]);
+    }
+  }, [detailItem?.id]);
+
+  // -------------------------------------------------------
+  // SAVE HARGA — tambah catatan harga baru
+  // -------------------------------------------------------
+  const saveHarga = async (e) => {
+    e.preventDefault();
+    if (!hargaForm.produk_id || !hargaForm.harga) return addToast("Produk dan harga wajib diisi", "error");
+    try {
+      await invoke("create_catatan_harga_supplier", {
+        input: {
+          supplier_id: detailItem.id,
+          produk_id: Number(hargaForm.produk_id),
+          harga: Number(hargaForm.harga),
+          satuan: hargaForm.satuan || "pcs",
+          catatan: hargaForm.catatan || null,
+        },
+      });
+      addToast("Catatan harga ditambahkan", "success");
+      setHargaForm({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
+      // Refresh list
+      invoke("list_catatan_harga_supplier", { supplier_id: detailItem.id })
+        .then(setHargaList)
+        .catch(() => {});
+    } catch (err) {
+      addToast(String(err), "error");
+    }
+  };
+
+  const hapusHarga = async (id) => {
+    if (!window.confirm("Hapus catatan harga ini?")) return;
+    try {
+      await invoke("delete_catatan_harga_supplier", { id });
+      addToast("Catatan harga dihapus", "success");
+      setHargaList((prev) => prev.filter((h) => h.id !== id));
+    } catch (err) {
+      addToast(String(err), "error");
+    }
+  };
 
   // -------------------------------------------------------
   // SAVE — simpan supplier baru atau update existing.
@@ -294,6 +354,46 @@ export default function Supplier() {
               <span className="material-symbols-outlined" style={{ fontSize: 18, verticalAlign: "middle", marginRight: 4 }}>edit</span>
               Edit Supplier
             </button>
+
+            {/* == Catatan Harga Supplier == */}
+            <div style={{ marginTop: "1rem" }}>
+              <p className="text-headline-sm" style={{ fontSize: "14px", fontWeight: 600, marginBottom: "0.75rem" }}>Catatan Harga Supplier</p>
+
+              {/* Form tambah */}
+              <form onSubmit={saveHarga} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem", padding: "0.75rem", background: "rgba(6,182,212,0.06)", borderRadius: "8px" }}>
+                <select className="input-field" value={hargaForm.produk_id} onChange={(e) => setHargaForm((p) => ({ ...p, produk_id: e.target.value }))} required>
+                  <option value="">Pilih produk...</option>
+                  {produkAll.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nama}</option>
+                  ))}
+                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.5rem" }}>
+                  <input className="input-field" type="number" placeholder="Harga satuan" value={hargaForm.harga} onChange={(e) => setHargaForm((p) => ({ ...p, harga: e.target.value }))} required />
+                  <input className="input-field" value={hargaForm.satuan} onChange={(e) => setHargaForm((p) => ({ ...p, satuan: e.target.value }))} placeholder="pcs" />
+                </div>
+                <input className="input-field" value={hargaForm.catatan} onChange={(e) => setHargaForm((p) => ({ ...p, catatan: e.target.value }))} placeholder="Catatan (opsional)" />
+                <button type="submit" className="btn-primary" style={{ width: "100%" }}>+ Tambah</button>
+              </form>
+
+              {/* List */}
+              {hargaList.length === 0 ? (
+                <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Belum ada catatan harga</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {hargaList.map((h) => (
+                    <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--color-surface)", borderRadius: "8px", border: "1px solid var(--color-surface-border)" }}>
+                      <div>
+                        <p className="text-body-sm" style={{ fontWeight: 500 }}>{h.produk_nama}</p>
+                        <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Rp {Number(h.harga).toLocaleString("id-ID")}/{h.satuan}{h.catatan ? ` · ${h.catatan}` : ""}</p>
+                      </div>
+                      <button className="btn-icon" onClick={() => hapusHarga(h.id)} style={{ color: "var(--color-expense-red)" }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

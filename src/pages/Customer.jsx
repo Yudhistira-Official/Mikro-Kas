@@ -1,12 +1,13 @@
 // ============================================================
-// Customer.jsx — CRUD customer + detail & chat WhatsApp
+// Customer.jsx — CRUD customer + detail, Chat WA, dan Import CSV massal.
 //
 // Fitur:
 //   - List customer (klik row → buka modal detail)
 //   - Form tambah/edit: nama, telepon, alamat, deskripsi tambahan
 //   - Detail customer: tampilkan semua info + tombol salin nomor + Chat WA
-//   - Tombol WA membuka whatsapp://send?phone=<nomor> via Tauri opener
-//     agar keluar dari WebView dan langsung menuju aplikasi WhatsApp
+//   - Import CSV: membaca file CSV secara native, parse & upsert data customer.
+//
+// Design ref: Stitch — "Import Customer CSV" & "Daftar Customer" (violet-cyan).
 // ============================================================
 import { useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
@@ -18,8 +19,6 @@ const waNumber = (telp) => {
   if (!telp) return "";
   let digits = String(telp).replace(/\D/g, "");
   if (digits.startsWith("0")) digits = "62" + digits.slice(1);
-  else if (digits.startsWith("62")) { /* sudah format 62 */ }
-  else digits = "62" + digits;
   return digits;
 };
 
@@ -28,26 +27,24 @@ export default function Customer() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showImportCSV, setShowImportCSV] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [editItem, setEditItem] = useState(null);
-  const [detailItem, setDetailItem] = useState(null); // customer yg dilihat di modal detail
-  const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
+  const [detailItem, setDetailItem] = useState(null);
+  const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
 
-  // -------------------------------------------------------
-  // LOAD — ambil semua customer dari backend.
-  // -------------------------------------------------------
   const load = () => {
     setLoading(true);
     invoke("list_customer")
       .then(setList)
-      .catch(e => addToast(String(e), "error"))
+      .catch((e) => addToast(String(e), "error"))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  // -------------------------------------------------------
-  // SAVE — simpan customer baru atau update existing.
-  // -------------------------------------------------------
   const save = async (e) => {
     e.preventDefault();
     if (!form.nama.trim()) return addToast("Nama harus diisi", "error");
@@ -57,6 +54,7 @@ export default function Customer() {
         telepon: form.telepon.trim() || null,
         alamat: form.alamat.trim() || null,
         deskripsi_tambahan: form.deskripsi_tambahan.trim() || null,
+        limit_kredit: Number(form.limit_kredit || 0),
       };
       if (editItem) {
         await invoke("update_customer", { id: editItem.id, input });
@@ -67,14 +65,13 @@ export default function Customer() {
       }
       setShowForm(false);
       setEditItem(null);
-      setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
+      setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
       load();
-    } catch (err) { addToast(String(err), "error"); }
+    } catch (err) {
+      addToast(String(err), "error");
+    }
   };
 
-  // -------------------------------------------------------
-  // EDIT — buka form dengan data existing.
-  // -------------------------------------------------------
   const edit = (item) => {
     setEditItem(item);
     setForm({
@@ -82,14 +79,12 @@ export default function Customer() {
       telepon: item.telepon || "",
       alamat: item.alamat || "",
       deskripsi_tambahan: item.deskripsi_tambahan || "",
+      limit_kredit: item.limit_kredit || 0,
     });
     setShowForm(true);
     setDetailItem(null);
   };
 
-  // -------------------------------------------------------
-  // HAPUS — delete customer by id.
-  // -------------------------------------------------------
   const hapus = async (id) => {
     if (!window.confirm("Hapus customer ini?")) return;
     try {
@@ -97,12 +92,11 @@ export default function Customer() {
       addToast("Customer terhapus", "success");
       setDetailItem(null);
       load();
-    } catch (err) { addToast(String(err), "error"); }
+    } catch (err) {
+      addToast(String(err), "error");
+    }
   };
 
-  // -------------------------------------------------------
-  // COPY PHONE — salin nomor telepon mentah ke clipboard.
-  // -------------------------------------------------------
   const copyPhone = async (telp) => {
     if (!telp) {
       addToast("Nomor telepon kosong", "error");
@@ -116,9 +110,6 @@ export default function Customer() {
     }
   };
 
-  // -------------------------------------------------------
-  // CHAT WA — buka aplikasi WhatsApp, bukan WebView bawaan.
-  // -------------------------------------------------------
   const chatWA = async (telp) => {
     const num = waNumber(telp);
     if (!num) {
@@ -133,25 +124,54 @@ export default function Customer() {
     }
   };
 
+  const handleImportCSV = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "CSV", extensions: ["csv", "txt"] }],
+      });
+      if (!selected) return;
+      const csvText = await readTextFile(selected);
+      const res = await invoke("import_customer_csv", { csvText });
+      setImportResult(res);
+      addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update`, "success");
+      load();
+    } catch (e) {
+      addToast(`Gagal import CSV: ${e}`, "error");
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* Header & Aksi Utama */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 className="text-headline-md">Daftar Customer</h2>
-        <button className="btn-primary" onClick={() => {
-          setEditItem(null);
-          setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
-          setShowForm(true);
-        }}>
-          + Customer
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+        <button
+          className="btn-secondary"
+          onClick={() => {
+            setEditItem(null);
+            setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
+            setShowForm(true);
+          }}
+        >
+          + Tambah Customer
+        </button>
+        <button className="btn-primary" onClick={() => { setImportResult(null); setShowImportCSV(true); }}>
+          Impor CSV
         </button>
       </div>
 
       {loading ? (
         <div className="loading-page"><div className="spinner" /></div>
       ) : list.length === 0 ? (
-        <div className="empty-state">
-          <span className="material-symbols-outlined">group</span>
-          <p>Belum ada customer</p>
+        <div className="empty-state" style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--color-text-tertiary)" }}>
+          <span className="material-symbols-outlined" style={{ fontSize: "48px" }}>group</span>
+          <p style={{ marginTop: "0.5rem" }}>Belum ada customer</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", overflow: "hidden" }}>
@@ -170,22 +190,22 @@ export default function Customer() {
               onClick={() => setDetailItem(c)}
             >
               <div>
-                <p className="text-headline-sm">{c.nama}</p>
+                <p className="text-headline-sm" style={{ fontWeight: 700 }}>{c.nama}</p>
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
                   {c.telepon || "No Telepon"} · {c.alamat || "No Alamat"}
                 </p>
               </div>
-              <div style={{ display: "flex", gap: "6px" }}>
+              <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
                 <button
                   className="btn-icon"
-                  onClick={(e) => { e.stopPropagation(); edit(c); }}
+                  onClick={() => edit(c)}
                   title="Edit"
                 >
                   <span className="material-symbols-outlined">edit</span>
                 </button>
                 <button
                   className="btn-icon"
-                  onClick={(e) => { e.stopPropagation(); hapus(c.id); }}
+                  onClick={() => hapus(c.id)}
                   style={{ color: "var(--color-expense-red)" }}
                   title="Hapus"
                 >
@@ -200,7 +220,7 @@ export default function Customer() {
       {/* MODAL DETAIL CUSTOMER */}
       {detailItem && (
         <div className="modal-overlay" onClick={() => setDetailItem(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h3 className="text-headline-md">Detail Customer</h3>
               <button className="btn-icon" onClick={() => setDetailItem(null)}>
@@ -208,7 +228,6 @@ export default function Customer() {
               </button>
             </div>
 
-            {/* Avatar + Nama */}
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
               <div style={{
                 width: 56, height: 56, borderRadius: "50%",
@@ -226,7 +245,6 @@ export default function Customer() {
               </div>
             </div>
 
-            {/* Info grid */}
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
               <div>
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Nomor Telepon</p>
@@ -254,9 +272,12 @@ export default function Customer() {
                   {detailItem.deskripsi_tambahan || "-"}
                 </p>
               </div>
+              <div>
+                <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Limit Kredit</p>
+                <p className="text-body-md">{detailItem.limit_kredit > 0 ? `Rp ${Number(detailItem.limit_kredit).toLocaleString("id-ID")}` : "Tidak terbatas"}</p>
+              </div>
             </div>
 
-            {/* Tombol Chat WA */}
             <button
               className="btn-primary"
               style={{
@@ -281,7 +302,6 @@ export default function Customer() {
               </p>
             )}
 
-            {/* Tombol Edit */}
             <button
               className="btn-secondary"
               style={{ width: "100%", marginTop: "0.5rem" }}
@@ -323,11 +343,53 @@ export default function Customer() {
                   style={{ resize: "vertical", minHeight: 70 }}
                 />
               </div>
+              <div>
+                <label className="input-label">Limit Kredit (Rp)</label>
+                <input
+                  className="input-field"
+                  value={form.limit_kredit || 0}
+                  onChange={e => setForm(prev => ({ ...prev, limit_kredit: Number(e.target.value.replace(/\D/g, "")) || 0 }))}
+                  placeholder="500000"
+                  inputMode="numeric"
+                />
+                <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>
+                  Batas maksimal piutang yang diizinkan. 0 = tanpa batas.
+                </p>
+              </div>
               <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.5rem" }}>
                 <button type="button" className="btn-secondary" onClick={() => setShowForm(false)} style={{ flex: 1 }}>Batal</button>
                 <button type="submit" className="btn-primary" style={{ flex: 1 }}>Simpan</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL IMPORT CSV */}
+      {showImportCSV && (
+        <div className="modal-overlay" onClick={() => setShowImportCSV(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
+            <h3 className="text-headline-md">Import Customer CSV</h3>
+            <p className="text-body-md" style={{ color: "var(--color-text-secondary)", margin: "0.25rem 0 1rem" }}>Unggah daftar customer dalam format CSV.</p>
+            <div className="card" style={{ background: "var(--color-surface-container-low)", border: "1px dashed var(--color-primary)", padding: "1.25rem", textAlign: "center", cursor: "pointer", marginBottom: "0.75rem" }} onClick={handleImportCSV}>
+              <span className="material-symbols-outlined" style={{ fontSize: "36px", color: "var(--color-primary)", marginBottom: "4px" }}>upload_file</span>
+              <p className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Pilih File CSV</p>
+              <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "2px" }}>Format: nama, telepon, alamat, deskripsi_tambahan</p>
+            </div>
+            {importResult && (
+              <div className="card" style={{ padding: "0.75rem", background: "var(--color-surface-container-lowest)", marginBottom: "0.75rem" }}>
+                <h4 className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Hasil Import:</h4>
+                <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Dibuat:</span><strong>{importResult.dibuat}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Diupdate:</span><strong>{importResult.diupdate}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Dilewati/Gagal:</span><strong style={{ color: "var(--color-expense-red)" }}>{importResult.dilewati}</strong></div>
+                {importResult.errors && importResult.errors.length > 0 && (
+                  <div style={{ maxHeight: "80px", overflowY: "auto", fontSize: "11px", color: "var(--color-expense-red)", marginTop: "4px", background: "var(--color-surface-container-low)", padding: "4px", borderRadius: "4px" }}>
+                    {importResult.errors.map((err, i) => <div key={i}>{err}</div>)}
+                  </div>
+                )}
+              </div>
+            )}
+            <button className="btn-secondary" style={{ width: "100%" }} onClick={() => setShowImportCSV(false)}>Tutup</button>
           </div>
         </div>
       )}

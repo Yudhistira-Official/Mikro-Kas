@@ -16,6 +16,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HutangPiutang> {
         status: row.get(7)?,
         tanggal: row.get(8)?,
         created_at: row.get(9)?,
+        jatuh_tempo: row.get(10)?,
     })
 }
 
@@ -26,7 +27,7 @@ pub fn list_hutang_piutang(
     status: Option<String>,
 ) -> Result<Vec<HutangPiutang>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut sql = String::from("SELECT id, tipe, kontak_id, kontak_tipe, jumlah, jumlah_bayar, keterangan, status, tanggal, created_at FROM hutang_piutang WHERE 1=1");
+    let mut sql = String::from("SELECT id, tipe, kontak_id, kontak_tipe, jumlah, jumlah_bayar, keterangan, status, tanggal, created_at, jatuh_tempo FROM hutang_piutang WHERE 1=1");
     let mut params_list: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(t) = tipe {
         sql.push_str(" AND tipe=?");
@@ -36,7 +37,7 @@ pub fn list_hutang_piutang(
         sql.push_str(" AND status=?");
         params_list.push(Box::new(s));
     }
-    sql.push_str(" ORDER BY tanggal DESC, id DESC");
+    sql.push_str(" ORDER BY CASE WHEN jatuh_tempo IS NULL OR jatuh_tempo = '' THEN 1 ELSE 0 END, jatuh_tempo ASC, tanggal DESC, id DESC");
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
         params_list.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -60,11 +61,11 @@ pub fn create_hutang_piutang(
     }
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO hutang_piutang (tipe, kontak_id, kontak_tipe, jumlah, keterangan, tanggal) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, datetime('now')))",
-        params![input.tipe, input.kontak_id, input.kontak_tipe, input.jumlah, input.keterangan, input.tanggal],
+        "INSERT INTO hutang_piutang (tipe, kontak_id, kontak_tipe, jumlah, keterangan, tanggal, jatuh_tempo) VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, datetime('now')), ?7)",
+        params![input.tipe, input.kontak_id, input.kontak_tipe, input.jumlah, input.keterangan, input.tanggal, input.jatuh_tempo],
     ).map_err(|e| format!("Gagal menyimpan hutang/piutang: {e}"))?;
     let id = conn.last_insert_rowid();
-    conn.query_row("SELECT id, tipe, kontak_id, kontak_tipe, jumlah, jumlah_bayar, keterangan, status, tanggal, created_at FROM hutang_piutang WHERE id=?1", params![id], map_row).map_err(|e| e.to_string())
+    conn.query_row("SELECT id, tipe, kontak_id, kontak_tipe, jumlah, jumlah_bayar, keterangan, status, tanggal, created_at, jatuh_tempo FROM hutang_piutang WHERE id=?1", params![id], map_row).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

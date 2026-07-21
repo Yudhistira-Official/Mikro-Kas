@@ -73,6 +73,45 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
         "INTEGER REFERENCES supplier(id)",
     );
 
+    match conn.execute_batch(include_str!("../migrations/005_fitur_pos_kasgo.sql")) {
+        Ok(_) => eprintln!("DB_INIT: Migrasi 005 sukses"),
+        Err(e) => eprintln!("DB_INIT: Migrasi 005 gagal/sudah pernah: {e}"),
+    }
+
+    // Evolusi kolom ringan untuk gap KasGo Phase 1 & 2.
+    // Kolom transaksi menyimpan biaya checkout eksplisit tanpa rebuild CHECK metode_bayar.
+    ensure_column(&conn, "transaksi", "pajak_nominal", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "transaksi", "biaya_layanan", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "transaksi", "ongkir", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(
+        &conn,
+        "transaksi",
+        "supplier_id",
+        "INTEGER REFERENCES supplier(id) ON DELETE SET NULL",
+    );
+    ensure_column(&conn, "produk", "foto_path", "TEXT");
+    ensure_column(&conn, "produk", "satuan_multi", "TEXT");
+    ensure_column(&conn, "produk", "harga_diskon", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "produk", "diskon_berlaku_sampai", "TEXT");
+
+    match conn.execute_batch(include_str!("../migrations/006_hutang_piutang_jatuh_tempo.sql")) {
+        Ok(_) => eprintln!("DB_INIT: Migrasi 006 sukses"),
+        Err(e) => eprintln!("DB_INIT: Migrasi 006 gagal/sudah pernah: {e}"),
+    }
+
+    // Gap KasGo Phase 3: piutang/hutang jatuh tempo untuk reminder pembayaran.
+    ensure_column(&conn, "hutang_piutang", "jatuh_tempo", "TEXT");
+
+    match conn.execute_batch(include_str!("../migrations/008_pesanan_customer_dp.sql")) {
+        Ok(_) => eprintln!("DB_INIT: Migrasi 008 sukses"),
+        Err(e) => eprintln!("DB_INIT: Migrasi 008 gagal/sudah pernah: {e}"),
+    }
+
+    match conn.execute_batch(include_str!("../migrations/009_pembelian_supplier_dp.sql")) {
+        Ok(_) => eprintln!("DB_INIT: Migrasi 009 sukses"),
+        Err(e) => eprintln!("DB_INIT: Migrasi 009 gagal/sudah pernah: {e}"),
+    }
+
     // Tabel retur terpisah agar riwayat retur bisa dilihat dan diedit tanpa menghapus kas manual.
     let _ = conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS retur (
@@ -95,6 +134,18 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
         CREATE INDEX IF NOT EXISTS idx_retur_transaksi ON retur(transaksi_id);
         CREATE INDEX IF NOT EXISTS idx_retur_item_retur ON retur_item(retur_id);"
     );
+
+    // Migrasi 011: shift management untuk tracking buka/tutup kasir harian.
+    let _ = conn.execute_batch(include_str!("../migrations/011_shift_management.sql"));
+
+    // Migrasi 012: PIN kasir untuk keamanan akses checkout.
+    let _ = conn.execute_batch(include_str!("../migrations/012_kasir_pin.sql"));
+
+    // Migrasi 013: Limit Kredit Pelanggan.
+    let _ = conn.execute_batch(include_str!("../migrations/013_limit_kredit.sql"));
+
+    // Migrasi 014: Catatan Harga Supplier.
+    let _ = conn.execute_batch(include_str!("../migrations/014_catatan_harga_supplier.sql"));
 
     eprintln!("DB_INIT: Success");
     conn

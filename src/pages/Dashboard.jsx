@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [jmlTransaksi, setJmlTransaksi] = useState(0);
   const [keuntungan, setKeuntungan] = useState(null);
+  const [retur, setRetur] = useState(null);
   const [toko, setToko] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -49,16 +50,18 @@ export default function Dashboard() {
       invoke("get_produk_terlaris", { ...range, limit: 3 }),
       invoke("get_transaksi_count", range),
       invoke("get_keuntungan_penjualan", range),
+      invoke("get_total_retur", range),
       invoke("get_recent_transactions", { limit: 5 }),
       invoke("get_toko"),
     ])
-      .then(([r, h, t, c, p, rec, tk]) => {
+      .then(([r, h, t, c, p, ret, rec, tk]) => {
         if (cancelled) return;
         setRingkasan(r);
         setHarian(h);
         setTerlaris(t);
         setJmlTransaksi(c);
         setKeuntungan(p);
+        setRetur(ret);
         setRecent(rec || []);
         setToko(tk);
       })
@@ -97,6 +100,15 @@ export default function Dashboard() {
   const profitPct = keuntungan?.total_penjualan
     ? ((keuntungan.total_keuntungan / keuntungan.total_penjualan) * 100).toFixed(1)
     : 0;
+
+  // Executive Summary 8 metrics — ref: KasGo Executive Dashboard
+  const grossSales = monthSales;
+  const totalRetur = retur?.total_retur || 0;
+  const netSales = grossSales - totalRetur;
+  const grossProfit = estProfit;
+  const profitMargin = netSales > 0 ? ((grossProfit / netSales) * 100).toFixed(1) : 0;
+  const totalExpenses = integratedExpense;
+  const avgOrderValue = jmlTransaksi > 0 ? Math.round(netSales / jmlTransaksi) : 0;
 
   const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
   const txTime = (t) => {
@@ -190,35 +202,53 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Quick Stats Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-        <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "10px", background: "#1a3757", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>receipt_long</span>
-            </div>
-            <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-secondary)" }}>Transaksi</p>
+      {/* Executive Summary — 8 metrics ala KasGo */}
+      <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
+        <h3 style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-text-primary)", display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--color-primary)", fontSize: "20px" }}>analytics</span>
+          Ringkasan Eksekutif
+        </h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          {/* 1. Penjualan Kotor — primary vibrant purple */}
+          <div style={{ background: "linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(124,58,237,0.25)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Penjualan Kotor</p>
+            <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(grossSales)}</p>
           </div>
-          <p style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-text-primary)" }}>{jmlTransaksi.toLocaleString("id-ID")}</p>
-          <p style={{ fontSize: "14px", color: "var(--color-text-secondary)", marginTop: "4px" }}>{ranges[rangeIdx].label}</p>
-        </div>
-        <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "rgba(16,185,129,0.1)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-income-green)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>account_balance_wallet</span>
-            </div>
-            <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-secondary)" }}>Estimasi Laba</p>
+          {/* 2. Retur — red-orange */}
+          <div style={{ background: "linear-gradient(135deg, #DC2626 0%, #F97316 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(220,38,38,0.2)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Retur</p>
+            <p style={{ fontSize: "22px", fontWeight: 800 }}>-{rupiah(totalRetur)}</p>
           </div>
-          <p style={{ fontSize: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{rupiah(estProfit)}</p>
-          <p style={{ fontSize: "14px", color: "var(--color-text-secondary)", marginTop: "4px" }}>Berdasarkan margin</p>
-        </div>
-        <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
-          <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>Pemasukan</p>
-          <p style={{ fontSize: "22px", fontWeight: 700, color: "var(--color-income-green)" }}>{rupiah(integratedIncome)}</p>
-        </div>
-        <div style={{ background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", padding: "1rem", boxShadow: "0 4px 12px rgba(0,0,0,0.04)" }}>
-          <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>Pengeluaran</p>
-          <p style={{ fontSize: "22px", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(integratedExpense)}</p>
+          {/* 3. Penjualan Bersih — emerald green */}
+          <div style={{ background: "linear-gradient(135deg, #059669 0%, #34D399 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(5,150,105,0.25)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Penjualan Bersih</p>
+            <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(netSales)}</p>
+          </div>
+          {/* 4. Keuntungan Kotor — violet-indigo */}
+          <div style={{ background: "linear-gradient(135deg, #6D28D9 0%, #818CF8 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(109,40,217,0.25)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Keuntungan Kotor</p>
+            <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(grossProfit)}</p>
+          </div>
+          {/* 5. Margin Keuntungan */}
+          <div style={{ background: "var(--color-surface-container)", borderRadius: "12px", padding: "1rem", border: "1px solid var(--color-outline-variant)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "4px" }}>Margin Keuntungan</p>
+            <p style={{ fontSize: "20px", fontWeight: 700, color: profitMargin >= 20 ? "var(--color-income-green)" : "var(--color-warning-amber)" }}>{profitMargin}%</p>
+          </div>
+          {/* 6. Jumlah Transaksi */}
+          <div style={{ background: "var(--color-surface-container)", borderRadius: "12px", padding: "1rem", border: "1px solid var(--color-outline-variant)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "4px" }}>Jumlah Transaksi</p>
+            <p style={{ fontSize: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{jmlTransaksi.toLocaleString("id-ID")}</p>
+          </div>
+          {/* 7. Pengeluaran Bisnis */}
+          <div style={{ background: "var(--color-surface-container)", borderRadius: "12px", padding: "1rem", border: "1px solid var(--color-outline-variant)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "4px" }}>Pengeluaran Bisnis</p>
+            <p style={{ fontSize: "20px", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(totalExpenses)}</p>
+          </div>
+          {/* 8. Nilai Transaksi Rata-Rata */}
+          <div style={{ background: "var(--color-surface-container)", borderRadius: "12px", padding: "1rem", border: "1px solid var(--color-outline-variant)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "4px" }}>Rata-Rata per Transaksi</p>
+            <p style={{ fontSize: "20px", fontWeight: 700, color: "var(--color-text-primary)" }}>{rupiah(avgOrderValue)}</p>
+          </div>
         </div>
       </div>
 

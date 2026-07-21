@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct ItemInput {
     pub produk_id: i64,
     pub qty: i64,
+    /// Satuan pilihan di kasir, misalnya dus/slop. Kosong berarti satuan dasar produk.
+    pub satuan_pilihan: Option<String>,
 }
 
 /// Payload edit penjualan. Server selalu menghitung ulang harga dan stok.
@@ -16,6 +18,9 @@ pub struct UpdatePenjualanInput {
 }
 
 /// Header transaksi (penjualan / pembelian)
+/// ponytail: pajak_nominal, biaya_layanan, ongkir ditambahkan untuk gap KasGo Phase 1.
+///   total_final = subtotal - diskon + pajak + biaya_layanan + ongkir.
+///   Kolom lama tetap nullable saat select agar query lama tidak pecah.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Transaksi {
     pub id: i64,
@@ -25,6 +30,17 @@ pub struct Transaksi {
     pub catatan: Option<String>,
     pub tanggal: String,
     pub created_at: String,
+    #[serde(default)]
+    pub pajak_nominal: i64,
+    #[serde(default)]
+    pub biaya_layanan: i64,
+    #[serde(default)]
+    pub ongkir: i64,
+    pub supplier_id: Option<i64>,
+    #[serde(default)]
+    pub supplier_nama: Option<String>,
+    #[serde(default)]
+    pub no_nota: Option<i64>,
 }
 
 /// Detail transaksi + item-itemnya

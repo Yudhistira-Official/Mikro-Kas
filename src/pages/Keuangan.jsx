@@ -6,6 +6,12 @@ import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 
 const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+const today = () => new Date().toISOString().slice(0, 10);
+const monthStart = () => {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().slice(0, 10);
+};
 
 const kategoriList = [
   "Penjualan", "Modal", "Gaji Karyawan", "Listrik & Air",
@@ -19,18 +25,19 @@ export default function Keuangan() {
   const [total, setTotal] = useState({ pemasukan: 0, pengeluaran: 0 });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
+  const [dari, setDari] = useState(monthStart);
+  const [sampai, setSampai] = useState(today);
+  const [kategoriFilter, setKategoriFilter] = useState("all");
 
   const load = () => {
-    const dari = new Date(); dari.setDate(1);
-    const sampai = new Date();
-    const range = { dari: dari.toISOString().slice(0, 10), sampai: sampai.toISOString().slice(0, 10) };
+    const range = { dari, sampai };
     invoke("get_ringkasan_kas", range).then(setTotal).catch(console.error);
     invoke("list_kas", range).then(setList).catch(console.error);
   };
 
   // Guard: React 19 crash jika useEffect return Promise (bukan function).
   // load() return Promise dari .then().catch() → jangan langsung jadi callback useEffect.
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [dari, sampai]);
 
   const save = async () => {
     const jumlah = Number(form.jumlah);
@@ -53,13 +60,57 @@ export default function Keuangan() {
     catch (e) { addToast(`Gagal: ${e}`, "error"); }
   };
 
-  const filtered = tab === "all" ? list : list.filter((item) => item.tipe === tab);
+  const filtered = list
+    .filter((item) => tab === "all" || item.tipe === tab)
+    .filter((item) => kategoriFilter === "all" || item.kategori === kategoriFilter);
   const saldo = total.pemasukan - total.pengeluaran;
+  const kategoriRows = Object.values(filtered.reduce((acc, item) => {
+    // Ringkasan arus kas per kategori agar owner cepat melihat sumber uang keluar/masuk.
+    const key = `${item.tipe}:${item.kategori}`;
+    acc[key] ||= { tipe: item.tipe, kategori: item.kategori, total: 0, count: 0 };
+    acc[key].total += Number(item.jumlah || 0);
+    acc[key].count += 1;
+    return acc;
+  }, {})).sort((a, b) => b.total - a.total);
+  const kategoriOptions = ["all", ...Array.from(new Set(list.map((item) => item.kategori))).sort((a, b) => a.localeCompare(b))];
+
+  const exportCsv = () => {
+    if (!filtered.length) return addToast("Tidak ada arus kas untuk diekspor", "error");
+    const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+    const rows = [
+      ["Tanggal", "Tipe", "Kategori", "Jumlah", "Keterangan"],
+      ...filtered.map((item) => [item.tanggal, item.tipe, item.kategori, item.jumlah, item.keterangan || ""]),
+      ["TOTAL", "pemasukan", "", total.pemasukan, ""],
+      ["TOTAL", "pengeluaran", "", total.pengeluaran, ""],
+      ["SALDO", "", "", saldo, ""],
+    ];
+    const blob = new Blob([`\ufeff${rows.map((row) => row.map(esc).join(",")).join("\n")}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Arus_Kas_${dari}_${sampai}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addToast("CSV arus kas dibuat", "success");
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem", position: "relative", minHeight: "60dvh" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="text-headline-md">Manajemen Keuangan</span>
+        <button className="btn-secondary" onClick={exportCsv} disabled={!filtered.length}>Export CSV</button>
+      </div>
+
+      {/* Filter periode dan kategori untuk laporan arus kas detail. */}
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", padding: "1rem" }}>
+        <div><label className="input-label">Dari</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
+        <div><label className="input-label">Sampai</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label className="input-label">Kategori</label>
+          <select className="input-field" value={kategoriFilter} onChange={(e) => setKategoriFilter(e.target.value)}>
+            {kategoriOptions.map((k) => <option key={k} value={k}>{k === "all" ? "Semua kategori" : k}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Ringkasan */}
@@ -71,6 +122,23 @@ export default function Keuangan() {
           <div><p style={{ color: "var(--color-expense-red)", fontWeight: 600, fontSize: "18px" }}>{rupiah(total.pengeluaran)}</p><p className="text-label-md" style={{ opacity: 0.8 }}>Pengeluaran</p></div>
         </div>
       </div>
+
+      {kategoriRows.length > 0 && (
+        <div className="card" style={{ padding: "1rem" }}>
+          <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Ringkasan per Kategori</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {kategoriRows.slice(0, 6).map((row) => (
+              <div key={`${row.tipe}:${row.kategori}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div>
+                  <p className="text-body-md" style={{ fontWeight: 700 }}>{row.kategori}</p>
+                  <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{row.count} transaksi · {row.tipe}</p>
+                </div>
+                <span style={{ fontWeight: 800, color: row.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)" }}>{rupiah(row.total)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div className="filter-row" style={{ marginBottom: "0.5rem" }}>

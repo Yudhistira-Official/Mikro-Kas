@@ -14,7 +14,11 @@ pub struct Produk {
     pub harga_jual: i64,
     pub stok: i64,
     pub stok_minimum: i64,
+    pub foto_path: Option<String>,
+    pub harga_diskon: i64,
+    pub diskon_berlaku_sampai: Option<String>,
     pub is_active: bool,
+    pub satuan_multi: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -30,4 +34,8 @@ pub struct ProdukInput {
     pub harga_jual: i64,
     pub stok: Option<i64>,
     pub stok_minimum: Option<i64>,
+    pub foto_path: Option<String>,
+    pub satuan_multi: Option<String>,
+    pub harga_diskon: Option<i64>,
+    pub diskon_berlaku_sampai: Option<String>,
 }
