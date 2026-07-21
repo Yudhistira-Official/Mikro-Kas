@@ -2,6 +2,82 @@
 
 Semua perubahan penting MikroKas dicatat di file ini.
 
+## v3.0.0 — 2026-07-21
+
+### Ringkasan
+
+Rilis lanjutan dari v2.0.0. Fokus utama: scanner barcode Android dibuat lebih stabil memakai native camera, scanner SKU ditambahkan ke form produk, modul POS offline-first diperluas, laporan diperbarui, dan README disesuaikan dengan logo serta struktur project terbaru.
+
+### Added
+
+- Scanner barcode native Android untuk Kasir:
+  - tombol scan lama tetap dipakai,
+  - popup scanner muncul di tengah,
+  - kamera bawaan HP langsung terbuka tanpa tombol tambahan,
+  - hasil foto dikirim balik ke MikroKas sebagai base64,
+  - barcode didekode memakai ZXing,
+  - produk dicari berdasarkan SKU.
+- Popup `SKU tidak ada dalam database` saat barcode terbaca tetapi produk belum terdaftar.
+- Scanner barcode native Android untuk Tambah Produk/Edit Produk:
+  - field SKU punya tombol scan,
+  - hasil barcode otomatis mengisi SKU produk,
+  - memakai komponen scanner yang sama dengan Kasir.
+- Generator barcode SVG dari SKU produk.
+- Import produk via CSV.
+- Foto produk via native file picker dan private storage aplikasi.
+- Harga diskon produk dan tanggal berlaku promo.
+- Multi-satuan produk berbasis JSON ringan.
+- Stock Opname batch dengan audit penyesuaian stok.
+- Riwayat stok/audit stok.
+- Pesanan customer dengan DP/uang muka.
+- Pembelian supplier dengan DP.
+- Catatan harga supplier per produk.
+- Hutang/piutang dengan jatuh tempo.
+- Limit kredit customer.
+- Promo lokal offline-first:
+  - Beli X Gratis Y,
+  - Tebus Murah,
+  - Minimum Belanja.
+- PIN kasir untuk keamanan aksi sensitif.
+- Shift management kasir.
+- Riwayat pembelian.
+- Tab laporan tambahan: pembelian, pengeluaran, margin, inventori, pelanggan.
+- README baru dengan logo MikroKas, daftar fitur terbaru, dan struktur ASCII project.
+
+### Changed
+
+- Scanner barcode tidak lagi mengandalkan `getUserMedia` WebView sebagai jalur utama karena tidak stabil di Samsung/Android WebView.
+- Scanner barcode tidak lagi memakai upload galeri atau input SKU manual di Kasir.
+- Flow scan Kasir disederhanakan: tekan scan → native camera terbuka → foto → kembali ke MikroKas → SKU diproses.
+- Popup scanner dirender dengan `createPortal` ke `document.body` agar tidak ikut layout halaman.
+- Event popup scanner memakai `stopPropagation` agar klik di popup tidak menambah produk di belakang.
+- Produk form sekarang memisahkan input SKU dan tombol scan agar lebih cocok di layar mobile.
+- Laporan diperluas agar lebih cocok untuk audit penjualan, pembelian, inventori, pelanggan, dan margin.
+- README menegaskan APK/AAB release output bukan bagian source repo; pengguna upload APK sendiri ke GitHub Releases.
+
+### Fixed
+
+- Klik di area popup scanner sebelumnya bisa menekan kartu produk di belakang dan menambah barang ke keranjang.
+- Barcode produk sering tidak terbaca saat memakai WebView camera live preview.
+- `getUserMedia` WebView bisa hang dan membuat scanner terasa tidak siap.
+- `<input capture="camera">` bisa diabaikan WebView dan membuka galeri.
+- Hasil scan SKU yang tidak ditemukan sekarang diberi popup jelas, bukan feedback samar.
+- Scanner di form produk mengurangi typo input SKU manual.
+- Beberapa payload Android/Tauri disesuaikan agar struktur data frontend-backend lebih stabil.
+
+### Security / Data Safety
+
+- Privacy scan sebelum push: bersih dari `.env`, token, secret, credential, keystore, private key, database lokal, dan file pribadi.
+- APK/AAB build output tidak disertakan dalam commit.
+- Data runtime tetap berada di private app data Android.
+- Android backup otomatis tetap dimatikan.
+
+### Build Verification
+
+- `npm run build` sukses.
+- `cargo check` sukses.
+- Push ke `origin/main` sukses pada commit `161dbd2`.
+
 ## v2.0.0 — 2026-07-20
 
 ### Ringkasan
