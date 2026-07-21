@@ -145,32 +145,3 @@ MikroKas/
 ├── vite.config.js
 └── README.md
 ```
-
-## Perintah Development
-
-```bash
-npm install
-npm run dev
-npm run build
-cd src-tauri && cargo check
-npm run tauri android build -- --target aarch64
-```
-
-APK release:
-
-```text
-src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
-```
-
-AAB release:
-
-```text
-src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
-```
-
-## Catatan Android
-
-- Install ulang manual disarankan setelah uninstall lama.
-- Karena backup Android sudah dimatikan, install baru seharusnya membuka database kosong.
-- Jika perangkat masih memulihkan data lama, hapus storage aplikasi dari Settings sebelum uninstall.
-- Kamera barcode saat ini memakai native Android camera bridge karena Samsung WebView sulit memakai `getUserMedia` secara stabil.
