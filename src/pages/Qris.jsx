@@ -68,8 +68,8 @@ export default function Qris() {
     if (!selectedProfile) return addToast("Pilih profil QRIS terlebih dahulu", "error");
     setLoading(true);
     try {
-      const image = await invoke("generate_qris", { nominal: n, profileId: selectedProfile.id });
-      setQrisImage(image);
+      const result = await invoke("generate_qris_dinamis", { nominal: n, profileId: selectedProfile.id });
+      setQrisImage(`data:image/png;base64,${result.qr_image_base64}`);
       setShowKeypad(false);
       loadHistory();
     } catch (e) {
@@ -81,7 +81,7 @@ export default function Qris() {
 
   const konfirmasiBayar = async (id) => {
     try {
-      await invoke("konfirmasi_qris", { qrisLogId: id });
+      await invoke("konfirmasi_bayar_qris", { qrisLogId: id });
       addToast("Pembayaran QRIS dikonfirmasi", "success");
       loadHistory();
       // Clear QR image if the confirmed transaction matches
