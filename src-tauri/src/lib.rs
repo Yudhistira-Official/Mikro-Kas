@@ -153,6 +153,94 @@ pub fn run() {
             commands::file_cmd::export_database_base64,
             commands::file_cmd::restore_database,
             commands::file_cmd::restore_database_base64,
+            // Multi User & Role
+            commands::user_cmd::create_user,
+            commands::user_cmd::login_user,
+            commands::user_cmd::list_users,
+            commands::user_cmd::deactivate_user,
+            commands::user_cmd::reset_password,
+            commands::user_cmd::log_user_action,
+            // Transaction numbering
+            commands::nomor_cmd::list_nomor_settings,
+            commands::nomor_cmd::update_nomor_setting,
+            commands::nomor_cmd::generate_nomor,
+            // PPN settings
+            commands::pajak_cmd::get_pajak_setting,
+            commands::pajak_cmd::update_pajak_setting,
+            commands::pajak_cmd::hitung_ppn,
+            // Phase 2: Master data
+            commands::master_cmd::list_master_bank,
+            commands::master_cmd::list_master_ekspedisi,
+            commands::master_cmd::list_master_merek,
+            commands::master_cmd::create_master_bank,
+            commands::master_cmd::create_master_ekspedisi,
+            commands::master_cmd::create_master_merek,
+            // Phase 3: Multi gudang
+            commands::gudang_cmd::list_gudang,
+            commands::gudang_cmd::create_gudang,
+            commands::gudang_cmd::update_gudang,
+            commands::gudang_cmd::delete_gudang,
+            commands::gudang_cmd::get_stok_per_gudang,
+            commands::gudang_cmd::transfer_stok,
+            commands::gudang_cmd::list_transfer_stok,
+            // Phase 3: Serial number
+            commands::serial_cmd::list_serial,
+            commands::serial_cmd::add_serial,
+            commands::serial_cmd::update_serial_status,
+            commands::serial_cmd::delete_serial,
+            // Phase 4-5: Akuntansi double-entry
+            commands::akuntansi_cmd::list_coa,
+            commands::akuntansi_cmd::create_coa,
+            commands::akuntansi_cmd::create_jurnal_manual,
+            commands::akuntansi_cmd::get_neraca_saldo,
+            commands::akuntansi_cmd::cek_jurnal_tidak_seimbang,
+            // Phase 4-5: Sales & komisi
+            commands::sales_cmd::list_sales,
+            commands::sales_cmd::create_sales,
+            commands::sales_cmd::update_sales,
+            commands::sales_cmd::delete_sales,
+            commands::sales_cmd::list_komisi_terutang,
+            commands::sales_cmd::bayar_komisi,
+            // Phase 4-5: Point loyalty
+            commands::point_cmd::get_point_setting,
+            commands::point_cmd::update_point_setting,
+            commands::point_cmd::get_saldo_point,
+            commands::point_cmd::tukar_point,
+            // Phase 4-5: Deposit
+            commands::deposit_cmd::get_or_create_deposit,
+            commands::deposit_cmd::top_up_deposit,
+            commands::deposit_cmd::gunakan_deposit,
+            commands::deposit_cmd::list_deposit_log,
+            // Phase 4-5: Tukar tambah
+            commands::tukar_tambah_cmd::create_tukar_tambah,
+            commands::tukar_tambah_cmd::list_tukar_tambah,
+            // Phase 4-5: Konsinyasi
+            commands::konsinyasi_cmd::create_konsinyasi_masuk,
+            commands::konsinyasi_cmd::list_konsinyasi_masuk,
+            commands::konsinyasi_cmd::create_konsinyasi_keluar,
+            commands::konsinyasi_cmd::list_konsinyasi_keluar,
+            // Phase 4-5: Perakitan & BOM
+            commands::perakitan_cmd::create_bom,
+            commands::perakitan_cmd::list_bom,
+            commands::perakitan_cmd::proses_perakitan,
+            // Phase 4-5: HPP batch FIFO/LIFO
+            commands::hpp_cmd::add_stok_batch,
+            commands::hpp_cmd::hitung_hpp_fifo,
+            commands::hpp_cmd::hitung_hpp_lifo,
+            // Phase 4-5: Maintenance
+            commands::maintenance_cmd::maintenance_database,
+            // Phase 1-2: Printer, display, pricing, export, pengiriman
+            commands::printer_cmd::build_struk_text,
+            commands::printer_cmd::print_struk,
+            commands::customer_display_cmd::get_customer_display_data,
+            commands::pricing_cmd::hitung_diskon_bertingkat,
+            commands::pricing_cmd::get_harga_jual,
+            commands::import_export_cmd::export_produk_csv,
+            commands::import_export_cmd::export_customer_csv,
+            commands::import_export_cmd::export_supplier_csv,
+            commands::pengiriman_cmd::create_pengiriman,
+            commands::pengiriman_cmd::update_pengiriman_status,
+            commands::pengiriman_cmd::list_pengiriman,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MikroKas");

@@ -32,6 +32,7 @@ anyhow = "1"
 thiserror = "2"
 base64 = "0.22"
 tauri-plugin-fs = "2"
+bcrypt = "0.15"
 
 [profile.release]
 opt-level = "z"

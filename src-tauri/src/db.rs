@@ -64,6 +64,12 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
         Err(e) => eprintln!("DB_INIT: Migrasi 004 gagal/sudah pernah: {e}"),
     }
 
+    ensure_column(&conn, "toko", "alamat", "TEXT");
+    ensure_column(&conn, "toko", "telepon", "TEXT");
+    ensure_column(&conn, "toko", "email", "TEXT");
+    ensure_column(&conn, "toko", "website", "TEXT");
+    ensure_column(&conn, "toko", "npwp", "TEXT");
+    ensure_column(&conn, "toko", "deskripsi", "TEXT");
     ensure_column(&conn, "customer", "deskripsi_tambahan", "TEXT");
     ensure_column(&conn, "supplier", "deskripsi_tambahan", "TEXT");
     ensure_column(
@@ -146,6 +152,29 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
 
     // Migrasi 014: Catatan Harga Supplier.
     let _ = conn.execute_batch(include_str!("../migrations/014_catatan_harga_supplier.sql"));
+
+    // Migrasi 015: Multi user & role untuk login desktop/kasir.
+    let _ = conn.execute_batch(include_str!("../migrations/015_user_role.sql"));
+
+    let _ = conn.execute_batch(include_str!("../migrations/016_nomor_setting.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/017_pajak_setting.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/019_pengiriman.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/020_master_tambahan.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/021_gudang.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/022_serial.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/023_saldo_awal.sql"));
+
+    // Phase 4-5: Akuntansi, komisi, loyalty, konsinyasi, perakitan, dan HPP batch.
+    let _ = conn.execute_batch(include_str!("../migrations/024_coa.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/025_sales_komisi.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/026_point.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/027_deposit.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/028_tukar_tambah.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/029_konsinyasi_masuk.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/030_konsinyasi_keluar.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/031_perakitan_bom.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/032_stok_batch_hpp.sql"));
+    ensure_column(&conn, "produk", "metode_hpp", "TEXT NOT NULL DEFAULT 'fifo'");
 
     eprintln!("DB_INIT: Success");
     conn

@@ -161,13 +161,24 @@ export default function Promo() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      <div>
-        <p className="text-headline-md">Promo & Marketing</p>
-        <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>
-          Atur promo yang otomatis berlaku di kasir.
-        </p>
-      </div>
+    <div className="sales-page">
+      <header className="sales-page__header">
+        <div>
+          <p className="sales-page__eyebrow">MASTER DATA</p>
+          <p className="text-headline-lg">Periode Promosi</p>
+          <p className="text-body-md sales-page__subtitle">
+            Atur promo yang otomatis berlaku di kasir saat pelanggan memenuhi syarat.
+          </p>
+        </div>
+      </header>
+
+      <section className="sales-stats">
+        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: minRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>local_offer</span><div><span>Min. Belanja</span><strong>{minRule.aktif ? "Aktif" : "Off"}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: bxgyRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>card_giftcard</span><div><span>Beli X Gratis Y</span><strong>{bxgyRule.aktif ? "Aktif" : "Off"}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: tmRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>redeem</span><div><span>Tebus Murah</span><strong>{tmRule.aktif ? "Aktif" : "Off"}</strong></div></div>
+      </section>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
       {/* ========== PROMO MINIMUM BELANJA ========== */}
       <div className="card" style={{ padding: "1.25rem" }}>
@@ -358,6 +369,7 @@ export default function Promo() {
           <button className="btn-secondary" type="button" onClick={resetTm}>Reset</button>
           <button className="btn-primary" type="button" onClick={saveTm}>Simpan Tebus Murah</button>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -25,3 +25,37 @@ pub mod qris_util_cmd;
 pub mod supplier_cmd;
 pub mod toko_cmd;
 pub mod transaksi_cmd;
+pub mod user_cmd;
+pub mod nomor_cmd;
+pub mod pajak_cmd;
+pub mod master_cmd;
+pub mod gudang_cmd;
+pub mod serial_cmd;
+/// Phase 4-5: Akuntansi double-entry (COA + jurnal)
+pub mod akuntansi_cmd;
+/// Phase 4-5: Sales representative dan komisi
+pub mod sales_cmd;
+/// Phase 4-5: Point loyalty system
+pub mod point_cmd;
+/// Phase 4-5: Deposit customer prabayar
+pub mod deposit_cmd;
+/// Phase 4-5: Tukar tambah barang
+pub mod tukar_tambah_cmd;
+/// Phase 4-5: Konsinyasi masuk dan keluar
+pub mod konsinyasi_cmd;
+/// Phase 4-5: Perakitan produk dan BOM
+pub mod perakitan_cmd;
+/// Phase 4-5: HPP tracking per batch (FIFO/LIFO)
+pub mod hpp_cmd;
+/// Phase 4-5: Maintenance database
+pub mod maintenance_cmd;
+/// Phase 1-2: Printer & struk text
+pub mod printer_cmd;
+/// Phase 1-2: Customer display data
+pub mod customer_display_cmd;
+/// Phase 1-2: Pricing & multi-tier discount
+pub mod pricing_cmd;
+/// Phase 1-2: Import/export CSV
+pub mod import_export_cmd;
+/// Phase 1-2: Pengiriman & resi
+pub mod pengiriman_cmd;

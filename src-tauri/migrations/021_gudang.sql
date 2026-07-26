@@ -1,0 +1,6 @@
+-- Migration 021: Multi gudang + stok per gudang
+CREATE TABLE IF NOT EXISTS gudang (id INTEGER PRIMARY KEY AUTOINCREMENT, nama TEXT NOT NULL, alamat TEXT, is_active INTEGER DEFAULT 1, is_default INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS stok_gudang (id INTEGER PRIMARY KEY AUTOINCREMENT, gudang_id INTEGER NOT NULL, produk_id INTEGER NOT NULL, qty REAL DEFAULT 0, FOREIGN KEY (gudang_id) REFERENCES gudang(id), FOREIGN KEY (produk_id) REFERENCES produk(id), UNIQUE(gudang_id, produk_id));
+CREATE TABLE IF NOT EXISTS transfer_stok (id INTEGER PRIMARY KEY AUTOINCREMENT, gudang_asal_id INTEGER NOT NULL, gudang_tujuan_id INTEGER NOT NULL, tgl_transfer TEXT DEFAULT (datetime('now')), status TEXT DEFAULT 'selesai', catatan TEXT, user_id INTEGER, FOREIGN KEY (gudang_asal_id) REFERENCES gudang(id), FOREIGN KEY (gudang_tujuan_id) REFERENCES gudang(id));
+CREATE TABLE IF NOT EXISTS transfer_stok_item (id INTEGER PRIMARY KEY AUTOINCREMENT, transfer_id INTEGER NOT NULL, produk_id INTEGER NOT NULL, qty REAL NOT NULL, FOREIGN KEY (transfer_id) REFERENCES transfer_stok(id), FOREIGN KEY (produk_id) REFERENCES produk(id));
+INSERT OR IGNORE INTO gudang (id, nama, is_default) VALUES (1, 'Gudang Utama', 1);

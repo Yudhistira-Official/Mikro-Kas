@@ -82,7 +82,7 @@ export default function Pembelian() {
   // FILTER PRODUK — tampilkan produk yang match search.
   // -------------------------------------------------------
   const shown = useMemo(
-    () => produk.filter((p) => p.nama.toLowerCase().includes(search.toLowerCase())),
+    () => produk.filter((p) => `${p.nama} ${p.sku || ""}`.toLowerCase().includes(search.toLowerCase())),
     [produk, search],
   );
 
@@ -200,7 +200,7 @@ export default function Pembelian() {
         <input
           className="input-field"
           style={{ flex: 1 }}
-          placeholder="Cari produk..."
+          placeholder="Cari produk / SKU..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -225,7 +225,7 @@ export default function Pembelian() {
                 {rupiah(p.harga_beli)}
               </p>
               <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
-                Stok: {p.stok}
+                {p.sku && <span style={{ marginRight: 4 }}>SKU: {p.sku}</span>}Stok: {p.stok}
               </p>
             </button>
           ))}
@@ -244,7 +244,7 @@ export default function Pembelian() {
               <span>
                 <b>{p.nama}</b>
                 <br />
-                <small>Stok: {p.stok}</small>
+                <small>{p.sku ? `SKU: ${p.sku} · ` : ""}Stok: {p.stok}</small>
               </span>
               <b style={{ color: "var(--color-primary)" }}>{rupiah(p.harga_beli)}</b>
             </button>

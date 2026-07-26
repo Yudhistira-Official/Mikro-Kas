@@ -40,10 +40,13 @@ const bytesToBase64 = (bytes) => {
 export default function BackupRestore() {
   const { addToast } = useToast();
   const [busy, setBusy] = useState(false);
+  /** Status terakhir per aksi: null | { type: "backup"|"restore", ok: bool, msg: string } */
+  const [lastStatus, setLastStatus] = useState(null);
 
   // ---------- Backup — user pilih lokasi, frontend tulis bytes ke lokasi itu ----------
   const backup = async () => {
     setBusy(true);
+    setLastStatus(null);
     logBackup("backup mulai");
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
@@ -54,7 +57,7 @@ export default function BackupRestore() {
         defaultPath: `mikrokas_backup_${new Date().toISOString().slice(0, 10)}.db`,
         filters: [{ name: "SQLite Database", extensions: ["db"] }],
       });
-      if (!filePath) { logBackup("backup dibatalkan user"); return; }
+      if (!filePath) { logBackup("backup dibatalkan user"); setBusy(false); return; }
       logBackup(`save target dipilih; ${safeTargetInfo(filePath)}`);
 
       const dbBase64 = await invoke("export_database_base64");
@@ -63,9 +66,11 @@ export default function BackupRestore() {
 
       await writeFile(filePath, bytes);
       logBackup(`writeFile sukses; bytes=${bytes.length}`);
+      setLastStatus({ type: "backup", ok: true, msg: "Backup berhasil disimpan ke file pilihan." });
       addToast("Backup berhasil disimpan", "success");
     } catch (e) {
       logBackup(`backup gagal; ${String(e?.message || e).slice(0, 300)}`);
+      setLastStatus({ type: "backup", ok: false, msg: `Backup gagal: ${String(e)}` });
       addToast(`Backup gagal: ${String(e)}`, "error");
     } finally {
       setBusy(false);
@@ -76,6 +81,7 @@ export default function BackupRestore() {
   const restore = async () => {
     if (!window.confirm("Restore akan menimpa seluruh database saat ini. Lanjutkan?")) return;
     setBusy(true);
+    setLastStatus(null);
     logBackup("restore mulai");
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -87,7 +93,7 @@ export default function BackupRestore() {
         multiple: false,
         directory: false,
       });
-      if (!selection) { logBackup("restore dibatalkan user"); return; }
+      if (!selection) { logBackup("restore dibatalkan user"); setBusy(false); return; }
       const filePath = typeof selection === "string" ? selection : selection.path;
       logBackup(`restore source dipilih; ${safeTargetInfo(filePath)}`);
 
@@ -95,34 +101,124 @@ export default function BackupRestore() {
       logBackup(`readFile sukses; bytes=${bytes.length}`);
       await invoke("restore_database_base64", { dbBase64: bytesToBase64(bytes) });
       logBackup("restore_database_base64 sukses");
+      setLastStatus({ type: "restore", ok: true, msg: "Restore berhasil. Tutup dan buka ulang aplikasi untuk menerapkan perubahan." });
       addToast("Restore berhasil. Silakan tutup dan buka ulang aplikasi.", "success");
     } catch (e) {
       logBackup(`restore gagal; ${String(e?.message || e).slice(0, 300)}`);
+      setLastStatus({ type: "restore", ok: false, msg: `Restore gagal: ${String(e)}` });
       addToast(`Restore gagal: ${String(e)}`, "error");
     } finally {
       setBusy(false);
     }
   };
 
-  return <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-    <h2 className="text-headline-md">Backup & Restore</h2>
+  return (
+    <div className="sales-page">
+      <header className="sales-page__header">
+        <div>
+          <p className="sales-page__eyebrow">MANAJEMEN DATA</p>
+          <h1 className="text-headline-lg">Backup &amp; Restore</h1>
+          <p className="text-body-md sales-page__subtitle">Simpan salinan database atau pulihkan dari file backup sebelumnya.</p>
+        </div>
+      </header>
 
-    <div className="card" style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>cloud_upload</span>
-        <p className="text-headline-sm">Backup Database</p>
-      </div>
-      <p className="text-body-md" style={{ color: "var(--color-text-secondary)" }}>Pilih lokasi file backup melalui dialog native. Tidak perlu mengetik path.</p>
-      <button className="btn-primary" onClick={backup} disabled={busy}>{busy ? "Memproses…" : "Pilih Lokasi & Backup"}</button>
-    </div>
+      {/* Stats info cards */}
+      <section className="sales-stats">
+        <div className="sales-stat-card">
+          <span className="material-symbols-outlined">database</span>
+          <div>
+            <span>Format</span>
+            <strong>SQLite .db</strong>
+          </div>
+        </div>
+        <div className="sales-stat-card">
+          <span className="material-symbols-outlined">folder_open</span>
+          <div>
+            <span>Lokasi</span>
+            <strong>Pilih via Dialog</strong>
+          </div>
+        </div>
+        <div className="sales-stat-card">
+          <span className="material-symbols-outlined">verified_user</span>
+          <div>
+            <span>Metode</span>
+            <strong>Base64 Transfer</strong>
+          </div>
+        </div>
+      </section>
 
-    <div className="card" style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span className="material-symbols-outlined" style={{ color: "var(--color-expense-red)" }}>download</span>
-        <p className="text-headline-sm">Restore Database</p>
+      {/* Status feedback */}
+      {lastStatus && (
+        <section className="sales-panel" style={{ padding: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+            <span
+              className="material-symbols-outlined"
+              style={{ color: lastStatus.ok ? "var(--color-income-green)" : "var(--color-expense-red)", fontSize: "22px", flexShrink: 0, marginTop: "2px" }}
+            >
+              {lastStatus.ok ? "check_circle" : "error"}
+            </span>
+            <div>
+              <p className="text-headline-sm" style={{ color: lastStatus.ok ? "var(--color-income-green)" : "var(--color-expense-red)", marginBottom: "4px" }}>
+                {lastStatus.type === "backup" ? "Backup" : "Restore"} {lastStatus.ok ? "Sukses" : "Gagal"}
+              </p>
+              <p className="text-body-md" style={{ color: "var(--color-text-secondary)" }}>{lastStatus.msg}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Action cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {/* Backup card */}
+        <section className="sales-panel" style={{ padding: "1.25rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "28px", color: "var(--color-primary)" }}>upload</span>
+            <div>
+              <p className="sales-page__eyebrow">LANGKAH 1</p>
+              <h2 className="text-headline-sm">Backup Database</h2>
+            </div>
+          </div>
+          <ol style={{ paddingLeft: "1.25rem", color: "var(--color-text-secondary)", fontSize: "13px", lineHeight: "1.7", marginBottom: "16px" }}>
+            <li>Klik tombol di bawah — dialog simpan file akan terbuka.</li>
+            <li>Pilih lokasi dan nama file (default sudah terisi tanggal hari ini).</li>
+            <li>Tunggu notifikasi <em>Backup berhasil</em> muncul.</li>
+          </ol>
+          <button className="btn-primary" onClick={backup} disabled={busy} style={{ width: "100%" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "16px", verticalAlign: "middle", marginRight: "6px" }}>save</span>
+            {busy ? "Memproses…" : "Pilih Lokasi & Backup"}
+          </button>
+        </section>
+
+        {/* Restore card */}
+        <section className="sales-panel" style={{ padding: "1.25rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "28px", color: "var(--color-expense-red)" }}>download</span>
+            <div>
+              <p className="sales-page__eyebrow" style={{ color: "var(--color-expense-red)" }}>LANGKAH 2 (opsional)</p>
+              <h2 className="text-headline-sm">Restore Database</h2>
+            </div>
+          </div>
+          <ol style={{ paddingLeft: "1.25rem", color: "var(--color-text-secondary)", fontSize: "13px", lineHeight: "1.7", marginBottom: "4px" }}>
+            <li>Klik tombol di bawah — dialog buka file akan terbuka.</li>
+            <li>Pilih file backup <code>.db</code> yang ingin dipulihkan.</li>
+            <li>Konfirmasi peringatan penimpaan data.</li>
+            <li>Restart aplikasi setelah restore selesai.</li>
+          </ol>
+          <p style={{ fontSize: "12px", color: "var(--color-warning-amber)", display: "flex", alignItems: "center", gap: "4px", marginBottom: "16px" }}>
+            <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>warning</span>
+            Data saat ini akan ditimpa dan tidak dapat dikembalikan.
+          </p>
+          <button
+            className="btn-secondary"
+            onClick={restore}
+            disabled={busy}
+            style={{ width: "100%", color: "var(--color-expense-red)", borderColor: "var(--color-expense-red)" }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: "16px", verticalAlign: "middle", marginRight: "6px" }}>restore</span>
+            {busy ? "Memproses…" : "Pilih File & Restore"}
+          </button>
+        </section>
       </div>
-      <p className="text-body-md" style={{ color: "var(--color-text-secondary)" }}>Pilih file backup <code>.db</code> dari dialog native. Aplikasi perlu direstart setelah restore.</p>
-      <button className="btn-secondary" onClick={restore} disabled={busy} style={{ color: "var(--color-expense-red)", borderColor: "var(--color-expense-red)" }}>{busy ? "Memproses…" : "Pilih File & Restore"}</button>
     </div>
-  </div>;
+  );
 }

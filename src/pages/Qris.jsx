@@ -25,7 +25,7 @@ export default function Qris() {
   const [qrisImage, setQrisImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
-  const [tab, setTab] = useState("generate"); // "generate" | "riwayat"
+  const [tab, setTab] = useState(() => window.innerWidth >= 768 ? "riwayat" : "generate"); // "generate" | "riwayat"
 
   const loadProfiles = useCallback(() => {
     invoke("list_qris_profile").then((list) => {

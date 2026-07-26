@@ -8,6 +8,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useToast } from "../hooks/useToast";
 import { generateBarcodeSVG } from "../utils/barcode";
 import BarcodeScanner from "../components/BarcodeScanner";
+import DropZoneImport from "../components/DropZoneImport";
 
 const rupiah = (n) => "Rp " + Number(n).toLocaleString("id-ID");
 
@@ -95,6 +96,14 @@ export default function Produk() {
     } catch (e) { addToast(`Gagal penyesuaian stok: ${e}`, "error"); }
   };
 
+  // Import produk CSV dari text: dipakai native picker dan drag-drop desktop.
+  const handleImportText = async (csvText) => {
+    const res = await invoke("import_produk_csv", { csvText });
+    setImportResult(res);
+    addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+    loadProduk();
+  };
+
   // Import produk CSV: baca file via native dialog, kirim teks ke Rust untuk parse + upsert.
   const handleImportCSV = async () => {
     try {
@@ -117,6 +126,12 @@ export default function Produk() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+      <div>
+        <h1 className="text-headline-lg">Daftar Item / Barang</h1>
+        <p className="text-body-md" style={{ color: "var(--color-text-secondary)" }}>
+          Menampilkan, menambah, mengubah, dan menghapus data barang, harga, stok, SKU, serta barcode.
+        </p>
+      </div>
       {/* Search bar */}
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <input
@@ -324,11 +339,11 @@ export default function Produk() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
             <h3 className="text-headline-md">Import Produk CSV</h3>
             <p className="text-body-md" style={{ color: "var(--color-text-secondary)", margin: "0.25rem 0 1rem" }}>Unggah daftar produk dalam format CSV.</p>
-            <div className="card" style={{ background: "var(--color-surface-container-low)", border: "1px dashed var(--color-primary)", padding: "1.25rem", textAlign: "center", cursor: "pointer", marginBottom: "0.75rem" }} onClick={handleImportCSV}>
-              <span className="material-symbols-outlined" style={{ fontSize: "36px", color: "var(--color-primary)", marginBottom: "4px" }}>upload_file</span>
-              <p className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Pilih File CSV</p>
-              <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "2px" }}>Format: nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum</p>
-            </div>
+            <DropZoneImport
+              title="Pilih atau Drop File CSV di sini"
+              subtitle="Format: nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum"
+              onText={async (text) => { try { await handleImportText(text); } catch(e) { addToast(String(e), "error"); } }}
+            />
             {importResult && (
               <div className="card" style={{ padding: "0.75rem", background: "var(--color-surface-container-lowest)", marginBottom: "0.75rem" }}>
                 <h4 className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Hasil Import:</h4>

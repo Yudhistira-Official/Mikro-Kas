@@ -197,7 +197,7 @@ export default function Keuangan() {
       {/* Bottom sheet form */}
       {showForm && <>
         <div className="modal-overlay" onClick={() => setShowForm(false)} />
-        <div style={{
+        <div className="keuangan-modal" style={{
           position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
           background: "var(--color-surface)", borderRadius: "16px 16px 0 0", padding: "1.25rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px))",
           boxShadow: "0 -8px 24px rgba(0,0,0,0.08)",

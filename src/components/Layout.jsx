@@ -14,7 +14,7 @@ const navItems = [
   { path: "/", label: "Dashboard", icon: "dashboard" },
   { path: "/transaksi", label: "Kasir", icon: "point_of_sale" },
   { path: "/qris", label: "QRIS", icon: "qr_code_2" },
-  { path: "/profile", label: "Profile", icon: "account_circle" },
+  { path: "/profile", label: "Lainnya", icon: "more_vert" },
 ];
 
 export default function Layout() {

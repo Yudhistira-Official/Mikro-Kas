@@ -49,11 +49,7 @@ export default function Shift() {
     const saldo_akhir = Number(closeData.saldo_akhir);
     if (isNaN(saldo_akhir)) return addToast("Saldo akhir harus diisi", "error");
     try {
-      await invoke("tutup_shift", {
-        id: closeForm.id,
-        saldo_akhir,
-        catatan: closeData.catatan.trim() || null,
-      });
+      await invoke("tutup_shift", { id: closeForm.id, saldo_akhir, catatan: closeData.catatan.trim() || null });
       addToast("Shift berhasil ditutup", "success");
       setCloseForm(null);
       setCloseData({ saldo_akhir: "", catatan: "" });
@@ -63,101 +59,73 @@ export default function Shift() {
     }
   };
 
-  const selisihColor = (s) => s === 0 ? "var(--color-success-green)" : s > 0 ? "var(--color-warning-amber)" : "var(--color-expense-red)";
+  const selisihColor = (s) => s === 0 ? "var(--color-income-green)" : s > 0 ? "var(--color-warning-amber)" : "var(--color-expense-red)";
+  const closedShifts = list.filter((s) => s.status !== "open");
+  const totalPenjualan = list.reduce((sum, s) => sum + Number(s.total_penjualan || 0), 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", position: "relative", minHeight: "60dvh" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span className="text-headline-md">Shift Management</span>
-        {!activeShift && (
-          <button className="btn-primary" onClick={() => setShowForm(true)}>Buka Shift</button>
-        )}
-      </div>
+    <div className="sales-page">
+      <header className="sales-page__header">
+        <div>
+          <p className="sales-page__eyebrow">OPERASIONAL KASIR</p>
+          <h1 className="text-headline-lg">Manajemen Shift</h1>
+          <p className="text-body-md sales-page__subtitle">Buka dan tutup shift kasir dengan pencatatan saldo yang rapi.</p>
+        </div>
+        {!activeShift && <button className="btn-primary sales-page__add" onClick={() => setShowForm(true)}><span className="material-symbols-outlined">add</span>Buka Shift</button>}
+      </header>
 
-      {/* Status shift aktif */}
+      <section className="sales-stats">
+        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: activeShift ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>schedule</span><div><span>Status Saat Ini</span><strong style={{ color: activeShift ? "var(--color-income-green)" : undefined }}>{activeShift ? "Aktif" : "Tidak Aktif"}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">history</span><div><span>Riwayat Selesai</span><strong>{closedShifts.length}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">payments</span><div><span>Total Penjualan</span><strong>{rupiah(totalPenjualan)}</strong></div></div>
+      </section>
+
       {activeShift && (
-        <div className="card" style={{ padding: "1.25rem", background: "linear-gradient(135deg, var(--color-primary), var(--color-secondary))", color: "white", borderRadius: "16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <p className="text-headline-sm">Shift Aktif</p>
-            <span className="badge" style={{ background: "rgba(255,255,255,0.25)", color: "white", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 600 }}>OPEN</span>
+        <section className="sales-panel" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--color-primary)" }}>
+          <div style={{ padding: "1rem 1.25rem", background: "var(--color-primary)", color: "white", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div><p style={{ fontSize: "11px", opacity: 0.8, letterSpacing: "0.08em", fontWeight: 700 }}>SHIFT AKTIF</p><h2 className="text-headline-sm">{activeShift.nama}</h2></div>
+            <span style={{ background: "rgba(255,255,255,0.2)", borderRadius: "20px", padding: "4px 10px", fontSize: "11px", fontWeight: 700 }}>OPEN</span>
           </div>
-          <p style={{ fontSize: "13px", opacity: 0.85, marginBottom: "8px" }}>{activeShift.nama}</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "8px" }}>
-            <div><p style={{ fontSize: "11px", opacity: 0.7 }}>Saldo Awal</p><p style={{ fontSize: "16px", fontWeight: 700 }}>{rupiah(activeShift.saldo_awal)}</p></div>
-            <div><p style={{ fontSize: "11px", opacity: 0.7 }}>Dibuka</p><p style={{ fontSize: "16px", fontWeight: 700 }}>{activeShift.opened_at}</p></div>
+          <div style={{ padding: "1.25rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "16px", marginBottom: "16px" }}>
+              <div><span className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Saldo Awal</span><p style={{ fontSize: "18px", fontWeight: 700, marginTop: "3px" }}>{rupiah(activeShift.saldo_awal)}</p></div>
+              <div><span className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Dibuka</span><p style={{ fontSize: "14px", fontWeight: 600, marginTop: "5px" }}>{activeShift.opened_at}</p></div>
+              <div><span className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Penjualan</span><p style={{ fontSize: "18px", fontWeight: 700, marginTop: "3px" }}>{rupiah(activeShift.total_penjualan)}</p></div>
+            </div>
+            <button className="btn-primary" onClick={() => setCloseForm(activeShift)} style={{ width: "100%" }}><span className="material-symbols-outlined" style={{ fontSize: "17px", verticalAlign: "middle", marginRight: "5px" }}>lock</span>Tutup Shift</button>
           </div>
-          <button className="btn-secondary" onClick={() => setCloseForm(activeShift)} style={{ marginTop: "12px", width: "100%", background: "rgba(255,255,255,0.2)", color: "white", border: "1px solid rgba(255,255,255,0.3)" }}>
-            Tutup Shift
-          </button>
-        </div>
+        </section>
       )}
 
-      {!activeShift && !showForm && (
-        <div className="card" style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-secondary)" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "48px", opacity: 0.3 }}>schedule</span>
-          <p style={{ marginTop: "8px" }}>Belum ada shift aktif</p>
-        </div>
-      )}
+      {!activeShift && !showForm && <div className="empty-state"><span className="material-symbols-outlined">schedule</span><h3>Belum ada shift aktif</h3><p>Buka shift untuk mulai mencatat aktivitas kasir.</p><button className="btn-primary" onClick={() => setShowForm(true)} style={{ marginTop: "12px" }}>Buka Shift</button></div>}
 
-      {/* Form buka shift */}
       {showForm && (
-        <div className="card" style={{ padding: "1.25rem" }}>
-          <p className="text-headline-sm" style={{ marginBottom: "12px" }}>Buka Shift Baru</p>
+        <section className="sales-panel" style={{ padding: "1.25rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}><span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>lock_open</span><div><p className="sales-page__eyebrow">FORM SHIFT</p><h2 className="text-headline-sm">Buka Shift Baru</h2></div></div>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <div><label className="input-label">Nama Shift</label><input className="input-field" placeholder="Shift Pagi / Shift Malam" value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} /></div>
-            <div><label className="input-label">Saldo Awal (Rp)</label><input className="input-field" type="number" placeholder="0" value={form.saldo_awal} onChange={(e) => setForm({ ...form, saldo_awal: e.target.value })} /></div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button className="btn-primary" onClick={bukaShift} style={{ flex: 1 }}>Buka Shift</button>
-              <button className="btn-secondary" onClick={() => setShowForm(false)} style={{ flex: 1 }}>Batal</button>
-            </div>
+            <div><label className="input-label">Saldo Awal (Rp)</label><input className="input-field" type="number" min="0" placeholder="0" value={form.saldo_awal} onChange={(e) => setForm({ ...form, saldo_awal: e.target.value })} /></div>
+            <div style={{ display: "flex", gap: "8px" }}><button className="btn-primary" onClick={bukaShift} style={{ flex: 1 }}>Buka Shift</button><button className="btn-secondary" onClick={() => setShowForm(false)} style={{ flex: 1 }}>Batal</button></div>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Modal tutup shift */}
       {closeForm && (
-        <div className="card" style={{ padding: "1.25rem", border: "2px solid var(--color-tertiary)" }}>
-          <p className="text-headline-sm" style={{ marginBottom: "12px" }}>Tutup Shift: {closeForm.nama}</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ background: "var(--color-surface-container)", padding: "12px", borderRadius: "12px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}><span className="text-label-md">Saldo Awal</span><span className="text-label-md">{rupiah(closeForm.saldo_awal)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span className="text-label-md">Penjualan (perkiraan)</span><span className="text-label-md">{rupiah(closeForm.total_penjualan)}</span></div>
-            </div>
-            <div><label className="input-label">Saldo Akhir Fisik (Rp)</label><input className="input-field" type="number" placeholder="Hitung uang di laci" value={closeData.saldo_akhir} onChange={(e) => setCloseData({ ...closeData, saldo_akhir: e.target.value })} /></div>
-            <div><label className="input-label">Catatan (opsional)</label><input className="input-field" placeholder="Shift lancar / ada kekurangan" value={closeData.catatan} onChange={(e) => setCloseData({ ...closeData, catatan: e.target.value })} /></div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button className="btn-primary" onClick={tutupShift} style={{ flex: 1 }}>Tutup Shift</button>
-              <button className="btn-secondary" onClick={() => setCloseForm(null)} style={{ flex: 1 }}>Batal</button>
-            </div>
+        <div className="modal-overlay" onClick={() => setCloseForm(null)}><div className="modal-content sales-form-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="sales-modal__header"><div><p className="sales-page__eyebrow">TUTUP SHIFT</p><h2 className="text-headline-sm">{closeForm.nama}</h2></div><button className="icon-button" onClick={() => setCloseForm(null)}><span className="material-symbols-outlined">close</span></button></div>
+          <div className="sales-form">
+            <div style={{ background: "var(--color-surface-container)", padding: "12px", borderRadius: "10px" }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}><span className="text-label-md">Saldo Awal</span><strong>{rupiah(closeForm.saldo_awal)}</strong></div><div style={{ display: "flex", justifyContent: "space-between" }}><span className="text-label-md">Penjualan</span><strong>{rupiah(closeForm.total_penjualan)}</strong></div></div>
+            <label>Saldo Akhir Fisik<input className="input-field" type="number" min="0" placeholder="Hitung uang di laci" value={closeData.saldo_akhir} onChange={(e) => setCloseData({ ...closeData, saldo_akhir: e.target.value })} /></label>
+            <label>Catatan (opsional)<input className="input-field" placeholder="Shift lancar / ada kekurangan" value={closeData.catatan} onChange={(e) => setCloseData({ ...closeData, catatan: e.target.value })} /></label>
+            <div className="sales-form__actions"><button className="btn-secondary" onClick={() => setCloseForm(null)}>Batal</button><button className="btn-primary" onClick={tutupShift}>Tutup Shift</button></div>
           </div>
-        </div>
+        </div></div>
       )}
 
-      {/* Riwayat shift */}
-      {list.length > 0 && (
-        <>
-          <p className="text-headline-sm">Riwayat Shift</p>
-          {list.map((s) => (
-            <div key={s.id} className="card" style={{ padding: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <span style={{ fontWeight: 600 }}>{s.nama}</span>
-                <span className="badge" style={{ background: s.status === "open" ? "var(--color-primary-container)" : "var(--color-surface-container-high)", color: s.status === "open" ? "var(--color-primary)" : "var(--color-text-secondary)", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 600, textTransform: "uppercase" }}>
-                  {s.status === "open" ? "OPEN" : "CLOSED"}
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                <div><span style={{ color: "var(--color-text-secondary)" }}>Awal: </span>{rupiah(s.saldo_awal)}</div>
-                {s.saldo_akhir != null && <div><span style={{ color: "var(--color-text-secondary)" }}>Akhir: </span>{rupiah(s.saldo_akhir)}</div>}
-                {s.total_penjualan > 0 && <div><span style={{ color: "var(--color-text-secondary)" }}>Penjualan: </span>{rupiah(s.total_penjualan)}</div>}
-                {s.total_pengeluaran > 0 && <div><span style={{ color: "var(--color-text-secondary)" }}>Pengeluaran: </span>{rupiah(s.total_pengeluaran)}</div>}
-                {s.closed_at && <div><span style={{ color: "var(--color-text-secondary)" }}>Ditutup: </span>{s.closed_at}</div>}
-                {s.selisih !== 0 && <div style={{ color: selisihColor(s.selisih), fontWeight: 700 }}><span style={{ color: "var(--color-text-secondary)" }}>Selisih: </span>{rupiah(s.selisih)}</div>}
-              </div>
-              {s.catatan && <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "8px" }}>{s.catatan}</p>}
-            </div>
-          ))}
-        </>
-      )}
+      <section className="sales-panel">
+        <div className="sales-panel__toolbar"><div><p className="sales-page__eyebrow">HISTORI</p><h2 className="text-headline-sm">Riwayat Shift</h2></div><button className="btn-secondary" onClick={load} disabled={loading} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", padding: "7px 12px" }}><span className="material-symbols-outlined" style={{ fontSize: "16px" }}>refresh</span>Refresh</button></div>
+        {loading ? <div className="loading-page" style={{ minHeight: "140px" }}><div className="spinner" /><span>Memuat riwayat…</span></div> : list.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">history</span><p>Belum ada riwayat shift</p></div> : <div style={{ overflowX: "auto" }}><table className="sales-table"><thead><tr><th>Nama Shift</th><th>Status</th><th>Saldo Awal</th><th>Saldo Akhir</th><th>Penjualan</th><th>Selisih</th><th>Ditutup</th></tr></thead><tbody>{list.map((s) => <tr key={s.id}><td><strong>{s.nama}</strong></td><td><span className={`badge ${s.status === "open" ? "badge-success" : ""}`}>{s.status === "open" ? "OPEN" : "CLOSED"}</span></td><td>{rupiah(s.saldo_awal)}</td><td>{s.saldo_akhir != null ? rupiah(s.saldo_akhir) : "—"}</td><td>{rupiah(s.total_penjualan)}</td><td style={{ color: selisihColor(Number(s.selisih || 0)), fontWeight: 700 }}>{s.selisih != null ? rupiah(s.selisih) : "—"}</td><td style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>{s.closed_at || "—"}</td></tr>)}</tbody></table></div>}
+      </section>
     </div>
   );
 }

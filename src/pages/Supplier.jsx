@@ -30,11 +30,15 @@ export default function Supplier() {
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null); // supplier yg dilihat di modal detail
+  const [openDetailSections, setOpenDetailSections] = useState({ info: true, harga: true });
+  const toggleSection = (key) => setOpenDetailSections(prev => ({ ...prev, [key]: !prev[key] }));
   const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
   // Catatan Harga Supplier
   const [hargaList, setHargaList] = useState([]);
   const [produkAll, setProdukAll] = useState([]);
   const [hargaForm, setHargaForm] = useState({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
+  const [produkQuery, setProdukQuery] = useState("");
+  const [query, setQuery] = useState("");
 
   // -------------------------------------------------------
   // LOAD — ambil semua supplier dari backend.
@@ -74,17 +78,23 @@ export default function Supplier() {
     e.preventDefault();
     if (!hargaForm.produk_id || !hargaForm.harga) return addToast("Produk dan harga wajib diisi", "error");
     try {
-      await invoke("create_catatan_harga_supplier", {
-        input: {
-          supplier_id: detailItem.id,
-          produk_id: Number(hargaForm.produk_id),
-          harga: Number(hargaForm.harga),
-          satuan: hargaForm.satuan || "pcs",
-          catatan: hargaForm.catatan || null,
+      const hargaInput = {
+        supplier_id: detailItem.id,
+        produk_id: Number(hargaForm.produk_id),
+        harga: Number(hargaForm.harga),
+        satuan: hargaForm.satuan || "pcs",
+        catatan: hargaForm.catatan || null,
+      };
+      const createdHarga = await invoke("create_catatan_harga_supplier", { input: hargaInput });
+      addToast("Catatan harga ditambahkan", "success", {
+        label: "Urungkan",
+        action: async () => {
+          await invoke("delete_catatan_harga_supplier", { id: createdHarga.id });
+          setHargaList((prev) => prev.filter((h) => h.id !== createdHarga.id));
         },
       });
-      addToast("Catatan harga ditambahkan", "success");
       setHargaForm({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
+      setProdukQuery("");
       // Refresh list
       invoke("list_catatan_harga_supplier", { supplier_id: detailItem.id })
         .then(setHargaList)
@@ -96,10 +106,26 @@ export default function Supplier() {
 
   const hapusHarga = async (id) => {
     if (!window.confirm("Hapus catatan harga ini?")) return;
+    const snapshot = hargaList.find((h) => h.id === id);
+    if (!snapshot) return;
     try {
       await invoke("delete_catatan_harga_supplier", { id });
-      addToast("Catatan harga dihapus", "success");
       setHargaList((prev) => prev.filter((h) => h.id !== id));
+      addToast("Catatan harga dihapus", "success", {
+        label: "Urungkan",
+        action: async () => {
+          const restored = await invoke("create_catatan_harga_supplier", {
+            input: {
+              supplier_id: snapshot.supplier_id,
+              produk_id: snapshot.produk_id,
+              harga: snapshot.harga,
+              satuan: snapshot.satuan,
+              catatan: snapshot.catatan,
+            },
+          });
+          setHargaList((prev) => [...prev, restored]);
+        },
+      });
     } catch (err) {
       addToast(String(err), "error");
     }
@@ -119,11 +145,32 @@ export default function Supplier() {
         deskripsi_tambahan: form.deskripsi_tambahan.trim() || null,
       };
       if (editItem) {
+        const oldData = { ...editItem };
         await invoke("update_supplier", { id: editItem.id, input });
-        addToast("Supplier diperbarui", "success");
+        addToast("Supplier diperbarui", "success", {
+          label: "Urungkan",
+          action: async () => {
+            await invoke("update_supplier", {
+              id: oldData.id,
+              input: {
+                nama: oldData.nama,
+                telepon: oldData.telepon,
+                alamat: oldData.alamat,
+                deskripsi_tambahan: oldData.deskripsi_tambahan,
+              },
+            });
+            load();
+          },
+        });
       } else {
-        await invoke("create_supplier", { input });
-        addToast("Supplier ditambahkan", "success");
+        const created = await invoke("create_supplier", { input });
+        addToast("Supplier ditambahkan", "success", {
+          label: "Urungkan",
+          action: async () => {
+            await invoke("delete_supplier", { id: created.id });
+            load();
+          },
+        });
       }
       setShowForm(false);
       setEditItem(null);
@@ -152,115 +199,107 @@ export default function Supplier() {
   // -------------------------------------------------------
   const hapus = async (id) => {
     if (!window.confirm("Hapus supplier ini?")) return;
+    const snapshot = list.find((s) => s.id === id);
+    if (!snapshot) return;
     try {
       await invoke("delete_supplier", { id });
-      addToast("Supplier terhapus", "success");
       setDetailItem(null);
       load();
+      addToast("Supplier terhapus", "success", {
+        label: "Urungkan",
+        action: async () => {
+          await invoke("create_supplier", {
+            input: {
+              nama: snapshot.nama,
+              telepon: snapshot.telepon,
+              alamat: snapshot.alamat,
+              deskripsi_tambahan: snapshot.deskripsi_tambahan,
+            },
+          });
+          load();
+        },
+      });
     } catch (err) { addToast(String(err), "error"); }
   };
 
   // -------------------------------------------------------
-  // COPY PHONE — salin nomor telepon mentah ke clipboard.
+  // CHAT WA — buka browser default ke wa.me
   // -------------------------------------------------------
-  const copyPhone = async (telp) => {
-    if (!telp) {
-      addToast("Nomor telepon kosong", "error");
-      return;
-    }
+  const whatsappLink = (telp) => {
+    const num = waNumber(telp);
+    return num ? `https://wa.me/${num}` : "";
+  };
+
+  const copyWALink = async (telp) => {
+    const link = whatsappLink(telp);
+    if (!link) return addToast("Nomor telepon kosong", "error");
     try {
-      await navigator.clipboard.writeText(telp);
-      addToast("Nomor telepon disalin", "success");
+      await navigator.clipboard.writeText(link);
+      addToast("Link WhatsApp disalin", "success");
     } catch (err) {
-      addToast(`Gagal salin nomor: ${err}`, "error");
+      addToast(`Gagal salin link WhatsApp: ${err}`, "error");
     }
   };
 
-  // -------------------------------------------------------
-  // CHAT WA — buka aplikasi WhatsApp, bukan WebView bawaan.
-  // -------------------------------------------------------
   const chatWA = async (telp) => {
-    const num = waNumber(telp);
-    if (!num) {
-      addToast("Nomor telepon kosong", "error");
-      return;
-    }
+    const link = whatsappLink(telp);
+    if (!link) return addToast("Nomor telepon kosong", "error");
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(`whatsapp://send?phone=${num}`);
+      await openUrl(link);
     } catch (err) {
       addToast(`Gagal membuka WhatsApp: ${err}`, "error");
     }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 className="text-headline-md">Daftar Supplier</h2>
-        <button className="btn-primary" onClick={() => {
-          setEditItem(null);
-          setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" });
-          setShowForm(true);
-        }}>
-          + Supplier
+    <div className="sales-page">
+      <header className="sales-page__header">
+        <div>
+          <p className="sales-page__eyebrow">MASTER DATA</p>
+          <h1 className="text-headline-lg">Daftar Supplier</h1>
+          <p className="text-body-md sales-page__subtitle">Menampilkan, menambah, mengubah, dan menghapus data supplier / pemasok barang.</p>
+        </div>
+        <button className="btn-primary sales-page__add" onClick={() => { setEditItem(null); setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" }); setShowForm(true); }}>
+          <span className="material-symbols-outlined">add</span>Tambah Supplier
         </button>
-      </div>
+      </header>
 
-      {loading ? (
-        <div className="loading-page"><div className="spinner" /></div>
-      ) : list.length === 0 ? (
-        <div className="empty-state">
-          <span className="material-symbols-outlined">local_shipping</span>
-          <p>Belum ada supplier</p>
+      <section className="sales-stats">
+        <div className="sales-stat-card"><span className="material-symbols-outlined">local_shipping</span><div><span>Total Supplier</span><strong>{list.length}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">phone</span><div><span>Punya Telepon</span><strong>{list.filter(s => s.telepon).length}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">location_on</span><div><span>Punya Alamat</span><strong>{list.filter(s => s.alamat).length}</strong></div></div>
+      </section>
+
+      <section className="sales-panel">
+        <div className="sales-panel__toolbar">
+          <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
+          <button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button>
         </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", overflow: "hidden" }}>
-          {list.map((s) => (
-            <div
-              key={s.id}
-              className="list-dense-item"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "1rem",
-                borderBottom: "1px solid var(--color-surface-border)",
-                cursor: "pointer",
-              }}
-              onClick={() => setDetailItem(s)}
-            >
-              <div>
-                <p className="text-headline-sm">{s.nama}</p>
-                <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
-                  {s.telepon || "No Telepon"} · {s.alamat || "No Alamat"}
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <button
-                  className="btn-icon"
-                  onClick={(e) => { e.stopPropagation(); edit(s); }}
-                  title="Edit"
-                >
-                  <span className="material-symbols-outlined">edit</span>
-                </button>
-                <button
-                  className="btn-icon"
-                  onClick={(e) => { e.stopPropagation(); hapus(s.id); }}
-                  style={{ color: "var(--color-expense-red)" }}
-                  title="Hapus"
-                >
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+        {loading ? <div className="loading-page"><div className="spinner" /></div> :
+         list.filter(s => `${s.nama} ${s.telepon || ""} ${s.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).length === 0 ?
+          <div className="empty-state"><span className="material-symbols-outlined">local_shipping</span><p>Belum ada supplier</p></div> : (
+          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Supplier</th><th>Telepon</th><th>Alamat</th><th>Aksi</th></tr></thead><tbody>
+            {list.filter(s => `${s.nama} ${s.telepon || ""} ${s.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).map((s) => (
+              <tr key={s.id}>
+                <td><button className="sales-name" onClick={() => setDetailItem(s)}><span className="sales-avatar">{s.nama.charAt(0).toUpperCase()}</span><span><strong>{s.nama}</strong><small>{s.deskripsi_tambahan || "Supplier"}</small></span></button></td>
+                <td>{s.telepon || "-"}</td>
+                <td>{s.alamat || "-"}</td>
+                <td><div className="sales-row-actions">
+                  {s.telepon && <button className="btn-icon" onClick={(e) => { e.stopPropagation(); chatWA(s.telepon); }} title="Chat WhatsApp" style={{ color: "#25D366" }}><span className="material-symbols-outlined">chat</span></button>}
+                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); edit(s); }} title="Edit"><span className="material-symbols-outlined">edit</span></button>
+                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); hapus(s.id); }} style={{ color: "var(--color-expense-red)" }} title="Hapus"><span className="material-symbols-outlined">delete</span></button>
+                </div></td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        )}
+      </section>
 
       {/* MODAL DETAIL SUPPLIER */}
       {detailItem && (
         <div className="modal-overlay" onClick={() => setDetailItem(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+          <div className="modal-content supplier-detail-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 430 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h3 className="text-headline-md">Detail Supplier</h3>
               <button className="btn-icon" onClick={() => setDetailItem(null)}>
@@ -286,8 +325,15 @@ export default function Supplier() {
               </div>
             </div>
 
-            {/* Info grid */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
+             <div className="supplier-info-section">
+               <button type="button" className="supplier-section-toggle" onClick={() => toggleSection("info")}>
+                 <span>Info Supplier</span>
+                 <span className="material-symbols-outlined">{openDetailSections.info ? "expand_less" : "expand_more"}</span>
+               </button>
+               {openDetailSections.info && (
+                 <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+             {/* Info grid */}
+             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
               <div>
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Nama</p>
                 <p className="text-body-md">{detailItem.nama || "-"}</p>
@@ -295,17 +341,12 @@ export default function Supplier() {
               <div>
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Nomor Telepon</p>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <button
-                    className="btn-icon"
-                    type="button"
-                    onClick={() => copyPhone(detailItem.telepon)}
-                    disabled={!detailItem.telepon}
-                    title="Salin nomor telepon"
-                    style={{ width: 30, height: 30, minWidth: 30 }}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>content_copy</span>
-                  </button>
                   <p className="text-body-md">{detailItem.telepon || "-"}</p>
+                  {detailItem.telepon && (
+                    <button className="btn-icon" type="button" onClick={() => copyWALink(detailItem.telepon)} title="Salin link WhatsApp" style={{ width: 28, height: 28, minWidth: 28 }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 15 }}>content_copy</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <div>
@@ -340,9 +381,12 @@ export default function Supplier() {
               Chat WhatsApp
             </button>
             {detailItem.telepon && (
-              <p className="text-label-md" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
-                wa.me/{waNumber(detailItem.telepon)}
-              </p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "var(--color-text-secondary)" }}>
+                <p className="text-label-md">{whatsappLink(detailItem.telepon)}</p>
+                <button className="btn-icon" type="button" onClick={() => copyWALink(detailItem.telepon)} title="Salin link WhatsApp" style={{ width: 28, height: 28, minWidth: 28 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 15 }}>content_copy</span>
+                </button>
+              </div>
             )}
 
             {/* Tombol Edit */}
@@ -355,18 +399,39 @@ export default function Supplier() {
               Edit Supplier
             </button>
 
-            {/* == Catatan Harga Supplier == */}
-            <div style={{ marginTop: "1rem" }}>
-              <p className="text-headline-sm" style={{ fontSize: "14px", fontWeight: 600, marginBottom: "0.75rem" }}>Catatan Harga Supplier</p>
+             </div>
+             )}
+             </div>
+
+             {/* == Catatan Harga Supplier == */}
+             <div className="supplier-price-section">
+               <button type="button" className="supplier-section-toggle" onClick={() => toggleSection("harga")}>
+                 <span>Catatan Harga Supplier</span>
+                 <span className="material-symbols-outlined">{openDetailSections.harga ? "expand_less" : "expand_more"}</span>
+               </button>
+               {openDetailSections.harga && (
+               <div style={{ marginTop: "0.75rem" }}>
 
               {/* Form tambah */}
-              <form onSubmit={saveHarga} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem", padding: "0.75rem", background: "rgba(6,182,212,0.06)", borderRadius: "8px" }}>
-                <select className="input-field" value={hargaForm.produk_id} onChange={(e) => setHargaForm((p) => ({ ...p, produk_id: e.target.value }))} required>
-                  <option value="">Pilih produk...</option>
-                  {produkAll.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nama}</option>
-                  ))}
-                </select>
+              <form onSubmit={saveHarga} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem", padding: "0.75rem", borderRadius: "8px" }}>
+                 <input
+                   className="input-field supplier-product-select"
+                   list="supplier-product-options"
+                   value={produkQuery}
+                   onChange={(e) => {
+                     setProdukQuery(e.target.value);
+                     const found = produkAll.find((p) =>
+                       `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` === e.target.value
+                     );
+                     setHargaForm((prev) => ({ ...prev, produk_id: found ? String(found.id) : "" }));
+                   }}
+                   placeholder="Ketik nama atau SKU produk..."
+                 />
+                 <datalist id="supplier-product-options">
+                   {produkAll.map((p) => (
+                     <option key={p.id} value={`${p.nama}${p.sku ? ` — ${p.sku}` : ""}`} />
+                   ))}
+                 </datalist>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.5rem" }}>
                   <input className="input-field" type="number" placeholder="Harga satuan" value={hargaForm.harga} onChange={(e) => setHargaForm((p) => ({ ...p, harga: e.target.value }))} required />
                   <input className="input-field" value={hargaForm.satuan} onChange={(e) => setHargaForm((p) => ({ ...p, satuan: e.target.value }))} placeholder="pcs" />
@@ -381,7 +446,7 @@ export default function Supplier() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   {hargaList.map((h) => (
-                    <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--color-surface)", borderRadius: "8px", border: "1px solid var(--color-surface-border)" }}>
+                     <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--color-surface)", borderRadius: "8px" }}>
                       <div>
                         <p className="text-body-sm" style={{ fontWeight: 500 }}>{h.produk_nama}</p>
                         <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Rp {Number(h.harga).toLocaleString("id-ID")}/{h.satuan}{h.catatan ? ` · ${h.catatan}` : ""}</p>
@@ -392,13 +457,15 @@ export default function Supplier() {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+               )}
+               </div>
+               )}
+             </div>
+           </div>
+         </div>
+       )}
 
-      {/* MODAL FORM TAMBAH/EDIT */}
+       {/* MODAL FORM TAMBAH/EDIT */}
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>

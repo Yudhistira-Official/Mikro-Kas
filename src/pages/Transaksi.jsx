@@ -15,7 +15,7 @@
 // ============================================================
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useToast } from "../hooks/useToast";
 import BarcodeScanner from "../components/BarcodeScanner";
 import PinGate from "../components/PinGate";
@@ -35,8 +35,7 @@ const parseSatuanMulti = (p) => {
 export default function Transaksi() {
   // Hook toast untuk notifikasi sukses/error.
   const { addToast } = useToast();
-  // Hook navigate/location untuk redirect QRIS dan reorder dari riwayat.
-  const navigate = useNavigate();
+  // Hook location untuk reorder dari riwayat.
   const location = useLocation();
 
   // --- State data ---
@@ -51,16 +50,22 @@ export default function Transaksi() {
   const [pajakNominal, setPajakNominal] = useState("");        // PPN/pajak nominal checkout
   const [biayaLayanan, setBiayaLayanan] = useState("");        // Service charge nominal checkout
   const [ongkir, setOngkir] = useState("");                    // Biaya pengiriman nominal checkout
-  const [submitting, setSubmitting] = useState(false);     // Flag disable tombol saat checkout
+  const [showPaymentError, setShowPaymentError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+     // Flag disable tombol saat checkout
   const [view, setView] = useState(() => localStorage.getItem("kasirView") || "card"); // card | list
   const [scanOpen, setScanOpen] = useState(false); // Kontrol modal BarcodeScanner
   const [cartCollapsed, setCartCollapsed] = useState(false);
+  const [uangDiterima, setUangDiterima] = useState("");
   const [promoRule, setPromoRule] = useState(readPromoMinimumRule); // Rule minimum belanja dari halaman Promo.
   const [bxgyRule, setBxgyRule] = useState(readPromoBxgyRule); // Rule Beli X Gratis Y dari halaman Promo.
   const [tmRule, setTmRule] = useState(readPromoTebusMurahRule); // Rule Tebus Murah dari halaman Promo.
   const [hasPins, setHasPins] = useState(false); // Ada PIN aktif untuk keamanan kasir
   const [showPinGate, setShowPinGate] = useState(false); // Tampilkan modal PIN gate saat checkout
   const [notFoundSku, setNotFoundSku] = useState(null); // SKU yang discan tapi tidak ada di produk
+  const [showPrintConfirm, setShowPrintConfirm] = useState(false); // Konfirmasi cetak faktur
+  const [lastTransactionId, setLastTransactionId] = useState(null); // ID transaksi untuk cetak struk
+  const [paymentSnapshot, setPaymentSnapshot] = useState(null); // Snapshot cart+state sebelum reset
 
   // Flag guard: cegah setState setelah unmount (crash saat cepat ganti tab).
   let cancelled = false;
@@ -112,6 +117,7 @@ export default function Transaksi() {
     invoke("list_kasir_pins")
       .then((pins) => { if (!cancelled) setHasPins(pins.length > 0); })
       .catch(() => {});
+    if (window.innerWidth >= 768) setCartCollapsed(false);
     return () => {
       cancelled = true;
       log("halaman kasir di-unmount");
@@ -188,6 +194,20 @@ export default function Transaksi() {
   const tmNominal = tmEligible ? Math.max(0, tmNormalHarga - tmHarga) : 0;
 
   const totalAkhir = total - diskonNominal - promoNominal - bxgyNominal - tmNominal + pajakValue + biayaValue + ongkirValue;
+  const kembalian = Math.max(0, Number(uangDiterima || 0) - totalAkhir);
+  const pembayaranTidakMencukupi = Number(uangDiterima || 0) < totalAkhir;
+
+  // End key → fokus ke input uang diterima
+  useEffect(() => {
+    const handle = (e) => {
+      if (e.key === "End" && cart.length > 0) {
+        e.preventDefault();
+        document.querySelector('input[aria-label="uang diterima"]')?.focus();
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [cart.length]);
 
   // -------------------------------------------------------
   // ADD — tambah produk ke keranjang (+1 qty).
@@ -267,13 +287,35 @@ export default function Transaksi() {
       setPajakNominal("");
       setBiayaLayanan("");
       setOngkir("");
-      load();
-      addToast(`Penjualan selesai: ${rupiah(r.total)}`, "success");
-
-      // Redirect ke QRIS jika metode bayar QRIS.
-      if (metodeBayar === "qris") {
-        navigate(`/qris?nominal=${r.total}&transaksiId=${r.transaksi_id}`);
-      }
+      setUangDiterima("");
+       load();
+       setLastTransactionId(r.transaksi_id);
+       setShowPrintConfirm(true);
+       addToast(`Penjualan selesai: ${rupiah(r.total)}`, "success", {
+         label: "Urungkan",
+         action: async () => {
+           try {
+              await invoke("delete_transaksi_penjualan", { id: r.transaksi_id });
+              if (paymentSnapshot) {
+                setCart(paymentSnapshot.cart);
+                setMetodeBayar(paymentSnapshot.metodeBayar);
+                setCustomerId(paymentSnapshot.customerId);
+                setDiskonTipe(paymentSnapshot.diskonTipe);
+                setDiskonValue(paymentSnapshot.diskonValue);
+                setPajakNominal(paymentSnapshot.pajakNominal);
+                setBiayaLayanan(paymentSnapshot.biayaLayanan);
+                setOngkir(paymentSnapshot.ongkir);
+                setUangDiterima(paymentSnapshot.uangDiterima);
+                setShowPaymentError(false);
+                setPaymentSnapshot(null);
+              }
+              await load();
+              addToast("Penjualan diurungkan; sesi kasir dipulihkan", "info");
+           } catch (e) {
+             addToast(`Gagal mengurungkan: ${e}`, "error");
+           }
+         },
+       });
     } catch (e) {
       addToast(`Gagal: ${e}`, "error");
       log(`checkout gagal: ${String(e).slice(0, 200)}`);
@@ -287,6 +329,22 @@ export default function Transaksi() {
       addToast("Keranjang kosong", "error");
       return;
     }
+    if (pembayaranTidakMencukupi) {
+      setShowPaymentError(true);
+      document.querySelector('input[aria-label="uang diterima"]')?.focus();
+      return;
+    }
+    setPaymentSnapshot({
+      cart: cart.map((item) => ({ ...item })),
+      metodeBayar,
+      customerId,
+      diskonTipe,
+      diskonValue,
+      pajakNominal,
+      biayaLayanan,
+      ongkir,
+      uangDiterima,
+    });
     if (hasPins) {
       setShowPinGate(true);
     } else {
@@ -307,59 +365,61 @@ export default function Transaksi() {
   // RENDER — UI kasir: search bar, filter, produk grid, cart footer.
   // -------------------------------------------------------
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", paddingBottom: cart.length ? "280px" : 0 }}>
-      {/* Search bar + tombol scan barcode + toggle view */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          className="input-field"
-          style={{ flex: 1 }}
-          placeholder="Cari produk / SKU..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {/* Tombol buka BarcodeScanner modal */}
-        <button
-          className="btn-icon"
-          onClick={() => {
-            log("tombol scan barcode ditekan");
-            setScanOpen(true);
-          }}
-          title="Scan Barcode"
-        >
-          <span className="material-symbols-outlined">qr_code_scanner</span>
-        </button>
-        {/* Toggle grid / list view */}
-        <button className="btn-icon" onClick={toggle} title="Ganti tampilan">
-          <span className="material-symbols-outlined">{view === "card" ? "view_list" : "grid_view"}</span>
-        </button>
+    <div className="kasir-page">
+      {/* Toolbar: search, scan, view toggle, customer, diskon */}
+      <div className="kasir-toolbar">
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            className="input-field"
+            style={{ flex: 1 }}
+            placeholder="Cari produk / SKU..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {/* Tombol buka BarcodeScanner modal */}
+          <button
+            className="btn-icon kasir-scan-btn"
+            onClick={() => {
+              log("tombol scan barcode ditekan");
+              setScanOpen(true);
+            }}
+            title="Scan Barcode"
+          >
+            <span className="material-symbols-outlined">qr_code_scanner</span>
+          </button>
+          {/* Toggle grid / list view */}
+          <button className="btn-icon" onClick={toggle} title="Ganti tampilan">
+            <span className="material-symbols-outlined">{view === "card" ? "view_list" : "grid_view"}</span>
+          </button>
+        </div>
+        {/* Dropdown customer + input diskon */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select
+            className="input-field"
+            style={{ flex: 1, minWidth: 160 }}
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+          >
+            <option value="">Tanpa customer</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>{c.nama}</option>
+            ))}
+          </select>
+          <input
+            className="input-field"
+            style={{ width: 160 }}
+            inputMode="numeric"
+            placeholder="Diskon Rp"
+            value={diskonValue}
+            onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
+          />
+        </div>
       </div>
 
-      {/* Dropdown customer + input diskon */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <select
-          className="input-field"
-          style={{ flex: 1, minWidth: 160 }}
-          value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
-        >
-          <option value="">Tanpa customer</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>{c.nama}</option>
-          ))}
-        </select>
-        <input
-          className="input-field"
-          style={{ width: 160 }}
-          inputMode="numeric"
-          placeholder="Diskon Rp"
-          value={diskonValue}
-          onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
-        />
-      </div>
-
+      <div className="kasir-products-area">
       {/* Grid produk (card view) */}
       {view === "card" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1.05rem" }}>
           {shown.map((p) => (
             <button
               key={p.id}
@@ -414,13 +474,23 @@ export default function Transaksi() {
           ))}
         </div>
       )}
+      </div>
 
-      {/* Cart footer — fixed di bawah saat ada item */}
-      {cart.length > 0 && (
-        <div className="cart-footer">
+      {/* Cart footer — panel tetap terlihat di desktop meski cart kosong */}
+      <div className={`cart-footer${cart.length ? "" : " cart-footer--empty"}`}>
           <div className="cart-footer-inner">
+            {/* Zona 1: Total Bayar */}
+            <div className="kasir-total-section">
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 2 }}>Total Bayar</div>
+              <div style={{ fontSize: 42, fontWeight: 800, color: "var(--color-primary)", lineHeight: 1.1, letterSpacing: "-0.02em" }}>
+                {rupiah(totalAkhir)}
+              </div>
+            </div>
+
+            {/* Zona 2: List produk */}
+            <div className="kasir-list-section">
             <button
-              className="btn-icon"
+              className="btn-icon kasir-collapse-btn"
               type="button"
               onClick={() => setCartCollapsed((v) => !v)}
               aria-label={cartCollapsed ? "buka keranjang" : "tutup keranjang"}
@@ -431,50 +501,43 @@ export default function Transaksi() {
               </span>
             </button>
 
-            {/* Daftar item di cart dengan tombol +/- qty */}
-            <div style={{ maxHeight: cartCollapsed ? 0 : 130, overflow: "auto", transition: "max-height 0.3s ease" }}>
+            <div className={`kasir-cart-items${cartCollapsed ? " kasir-cart-items--collapsed" : ""}`}>
+              <div className="kasir-cart-header">
+                <span>Nama Produk</span>
+                <span>Harga</span>
+                <span>Jumlah</span>
+              </div>
               {cart.map((i) => {
                 const p = produk.find((x) => x.id === i.produk_id);
+                const harga = hargaItemAktif(p, i.satuan_pilihan);
+                const rules = parseSatuanMulti(p);
                 return (
-                  <div
-                    key={i.produk_id}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "5px 0",
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{p?.nama}</span>
-                    {(() => {
-                      const rules = parseSatuanMulti(p);
-                      if (rules.length === 0) return <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{rupiah(hargaItemAktif(p, i.satuan_pilihan))}</span>;
-                      return (
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                          <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{rupiah(hargaItemAktif(p, i.satuan_pilihan))}</span>
-                          <select
-                            className="input-field"
-                            style={{ padding: "2px 4px", fontSize: "11px", height: "auto", width: "fit-content" }}
-                            value={i.satuan_pilihan || ""}
-                            onChange={(e) => {
-                              setCart((old) => old.map((x) => x.produk_id === i.produk_id ? { ...x, satuan_pilihan: e.target.value } : x));
-                            }}
-                          >
-                            <option value="">{p.satuan}</option>
-                            {rules.map((r, idx) => (
-                              <option key={idx} value={r.satuan}>{r.satuan} ({r.konversi}x)</option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })()}
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <button className="btn-icon" type="button" onClick={() => qty(i.produk_id, -1)} aria-label="kurangi qty">
-                        −
-                      </button>
+                  <div className="kasir-cart-row" key={i.produk_id}>
+                    <div className="kasir-cart-product">
+                      <span>{p?.nama}</span>
+                      {rules.length > 0 && (
+                        <select
+                          className="input-field"
+                          value={i.satuan_pilihan || ""}
+                          onChange={(e) => {
+                            setCart((old) => old.map((x) => x.produk_id === i.produk_id ? { ...x, satuan_pilihan: e.target.value } : x));
+                          }}
+                        >
+                          <option value="">{p.satuan}</option>
+                          {rules.map((r, idx) => (
+                            <option key={idx} value={r.satuan}>{r.satuan} ({r.konversi}x)</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div className="kasir-cart-price" aria-label={`harga ${rupiah(harga * i.qty)}`}>
+                      <span>Rp</span>
+                      <span>{Number(harga * i.qty).toLocaleString("id-ID")}</span>
+                    </div>
+                    <div className="kasir-cart-quantity">
+                      <button className="btn-icon" type="button" onClick={() => qty(i.produk_id, -1)} aria-label="kurangi qty">−</button>
                       <input
                         className="input-field"
-                        style={{ width: 56, textAlign: "center", padding: "8px 6px" }}
                         inputMode="numeric"
                         value={i.qty}
                         onChange={(e) => {
@@ -485,50 +548,41 @@ export default function Transaksi() {
                         }}
                         aria-label="qty manual"
                       />
-                      <button className="btn-icon" type="button" onClick={() => qty(i.produk_id, 1)} aria-label="tambah qty">
-                        +
-                      </button>
-                    </span>
+                      <button className="btn-icon" type="button" onClick={() => qty(i.produk_id, 1)} aria-label="tambah qty">+</button>
+                    </div>
                   </div>
                 );
               })}
             </div>
+            </div>
 
+            {/* Zona 3: Detail pembayaran dan tombol Bayar */}
+            <div className="kasir-actions-section">
+            <div className="kasir-payment-details">
             {/* Pilihan metode pembayaran */}
             {!cartCollapsed && (
               <>
-                <div className="filter-row">
+                <div className="kasir-payment-methods">
                   <button
                     type="button"
-                    className={`filter-chip${metodeBayar === "tunai" ? " active" : ""}`}
+                    className={`filter-chip kasir-payment-method${metodeBayar === "tunai" ? " active" : ""}`}
                     onClick={() => setMetodeBayar("tunai")}
                   >
                     Tunai
                   </button>
                   <button
                     type="button"
-                    className={`filter-chip${metodeBayar === "qris" ? " active" : ""}`}
+                    className={`filter-chip kasir-payment-method${metodeBayar === "qris" ? " active" : ""}`}
                     onClick={() => setMetodeBayar("qris")}
                   >
                     QRIS
                   </button>
-                </div>
-
-                {/* Diskon: nominal atau persen */}
-                <div className="filter-row">
                   <button
                     type="button"
-                    className={`filter-chip${diskonTipe === "nominal" ? " active" : ""}`}
-                    onClick={() => setDiskonTipe("nominal")}
+                    className={`filter-chip kasir-payment-method${metodeBayar === "transfer" ? " active" : ""}`}
+                    onClick={() => setMetodeBayar("transfer")}
                   >
-                    Rp
-                  </button>
-                  <button
-                    type="button"
-                    className={`filter-chip${diskonTipe === "persen" ? " active" : ""}`}
-                    onClick={() => setDiskonTipe("persen")}
-                  >
-                    %
+                    Transfer
                   </button>
                 </div>
               </>
@@ -581,18 +635,28 @@ export default function Transaksi() {
             )}
             {(!cartCollapsed || diskonValueNumber > 0) && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginBottom: 8, fontSize: 13 }}>
-                <span>{diskonTipe === "persen" ? "Diskon %" : "Diskon Rp"}</span>
+                <span>Diskon</span>
                 {cartCollapsed ? (
                   <b style={{ textAlign: "right" }}>{rupiah(diskonNominal)}</b>
                 ) : (
-                  <input
-                    className="input-field"
-                    style={{ width: 120, textAlign: "right" }}
-                    inputMode="numeric"
-                    placeholder={diskonTipe === "persen" ? "0" : "0"}
-                    value={diskonValue}
-                    onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button
+                      type="button"
+                      className="filter-chip active"
+                      style={{ minWidth: 36, padding: "4px 10px", fontSize: 13 }}
+                      onClick={() => setDiskonTipe(diskonTipe === "nominal" ? "persen" : "nominal")}
+                    >
+                      {diskonTipe === "nominal" ? "Rp" : "%"}
+                    </button>
+                    <input
+                      className="input-field"
+                      style={{ width: 100, textAlign: "right" }}
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={diskonValue}
+                      onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
+                    />
+                  </div>
                 )}
               </div>
             )}
@@ -616,23 +680,50 @@ export default function Transaksi() {
                 <b style={{ textAlign: "right" }}>{tmEligible ? `-${rupiah(tmNominal)}` : "Belum memenuhi"}</b>
               </div>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginBottom: 12, fontSize: 15 }}>
-              <span>Total Bayar</span>
-              <b style={{ textAlign: "right" }}>{rupiah(totalAkhir)}</b>
+             {showPaymentError && pembayaranTidakMencukupi && (
+               <div className="kasir-payment-error">Pembayaran &quot;Tidak Mencukupi&quot;</div>
+             )}
+             <input
+               className={`input-field${showPaymentError && pembayaranTidakMencukupi ? " kasir-payment-input--error" : ""}`}
+               style={{ textAlign: "right", marginBottom: 8 }}
+               inputMode="numeric"
+               placeholder="Uang diterima"
+               value={uangDiterima ? `Rp ${Number(uangDiterima).toLocaleString("id-ID")}` : ""}
+               onChange={(e) => {
+                 setUangDiterima(e.target.value.replace(/\D/g, ""));
+                 setShowPaymentError(false);
+               }}
+               onKeyDown={(e) => {
+                 if (e.key === "Enter") {
+                   e.preventDefault();
+                   submit();
+                 }
+               }}
+               aria-label="uang diterima"
+               aria-invalid={showPaymentError && pembayaranTidakMencukupi}
+             />
+            {Number(uangDiterima || 0) > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginBottom: 12, fontSize: 15, color: "var(--color-income-green)" }}>
+                <span>Kembalian</span>
+                <b style={{ textAlign: "right" }}>{rupiah(kembalian)}</b>
+              </div>
+            )}
             </div>
 
             {/* Tombol bayar — trigger checkout */}
-            <button
-              className="btn-primary"
-              style={{ width: "100%" }}
-              disabled={submitting}
-              onClick={submit}
-            >
-              Bayar {rupiah(totalAkhir)}
-            </button>
+             <div className="kasir-pay-btn-wrap">
+              <button
+                className="btn-primary"
+                style={{ width: "100%" }}
+                disabled={submitting}
+                onClick={submit}
+              >
+                 Bayar
+              </button>
+            </div>
+            </div>
           </div>
         </div>
-      )}
 
       {/* Modal BarcodeScanner — muncul saat scanOpen true */}
       {scanOpen && (
@@ -705,6 +796,59 @@ export default function Transaksi() {
             executeSubmit();
           }}
         />
+      )}
+
+      {/* Popup cetak faktur setelah transaksi tersimpan */}
+      {showPrintConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cetak faktur"
+          style={{ position: "fixed", inset: 0, zIndex: 20000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(6px)" }}
+        >
+          <div
+            className="card"
+            style={{ width: "min(92vw, 360px)", textAlign: "center", borderRadius: 24, padding: 28, background: "#ffffff", boxShadow: "0 24px 60px rgba(15,23,42,0.25)" }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setShowPrintConfirm(false);
+                invoke("print_struk", { transaksiId: lastTransactionId })
+                  .then(() => addToast("Struk dicetak", "success"))
+                  .catch((err) => addToast(`Gagal cetak: ${err}`, "error"));
+              }
+              if (e.key === "Escape") setShowPrintConfirm(false);
+            }}
+          >
+            <div style={{ width: 48, height: 48, margin: "0 auto 12px", borderRadius: 12, display: "grid", placeItems: "center", background: "var(--color-primary-fixed)", color: "var(--color-primary)" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 28 }}>print</span>
+            </div>
+            <h2 style={{ margin: "0 0 16px", fontSize: 16, color: "var(--color-text-primary)" }}>Cetak faktur?</h2>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setShowPrintConfirm(false)}
+              >
+                Tidak
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ flex: 1 }}
+                autoFocus
+                onClick={() => {
+                  setShowPrintConfirm(false);
+                  invoke("print_struk", { transaksiId: lastTransactionId })
+                    .then(() => addToast("Struk dicetak", "success"))
+                    .catch((err) => addToast(`Gagal cetak: ${err}`, "error"));
+                }}
+              >
+                Ya
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

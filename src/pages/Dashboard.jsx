@@ -106,8 +106,9 @@ export default function Dashboard() {
   const totalRetur = retur?.total_retur || 0;
   const netSales = grossSales - totalRetur;
   const grossProfit = estProfit;
-  const profitMargin = netSales > 0 ? ((grossProfit / netSales) * 100).toFixed(1) : 0;
   const totalExpenses = integratedExpense;
+  const netProfit = grossProfit - totalExpenses;
+  const profitMargin = netSales > 0 ? ((grossProfit / netSales) * 100).toFixed(1) : 0;
   const avgOrderValue = jmlTransaksi > 0 ? Math.round(netSales / jmlTransaksi) : 0;
 
   const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -219,17 +220,22 @@ export default function Dashboard() {
             <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Retur</p>
             <p style={{ fontSize: "22px", fontWeight: 800 }}>-{rupiah(totalRetur)}</p>
           </div>
-          {/* 3. Penjualan Bersih — emerald green */}
-          <div style={{ background: "linear-gradient(135deg, #059669 0%, #34D399 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(5,150,105,0.25)" }}>
+          {/* 3. Penjualan Bersih — full-width emerald green */}
+          <div style={{ gridColumn: "1 / -1", background: "linear-gradient(135deg, #059669 0%, #34D399 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(5,150,105,0.25)" }}>
             <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Penjualan Bersih</p>
             <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(netSales)}</p>
           </div>
-          {/* 4. Keuntungan Kotor — violet-indigo */}
-          <div style={{ background: "linear-gradient(135deg, #6D28D9 0%, #818CF8 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(109,40,217,0.25)" }}>
-            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Keuntungan Kotor</p>
+          {/* 4. Laba Kotor — amber yellow */}
+          <div style={{ background: "linear-gradient(135deg, #D97706 0%, #FCD34D 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(217,119,6,0.25)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Laba Kotor</p>
             <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(grossProfit)}</p>
           </div>
-          {/* 5. Margin Keuntungan */}
+          {/* 5. Keuntungan Bersih — blue */}
+          <div style={{ background: "linear-gradient(135deg, #1D4ED8 0%, #60A5FA 100%)", borderRadius: "16px", padding: "1.25rem", color: "white", boxShadow: "0 4px 12px rgba(29,78,216,0.25)" }}>
+            <p style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginBottom: "4px" }}>Keuntungan Bersih</p>
+            <p style={{ fontSize: "22px", fontWeight: 800 }}>{rupiah(netProfit)}</p>
+          </div>
+          {/* 6. Margin Keuntungan */}
           <div style={{ background: "var(--color-surface-container)", borderRadius: "12px", padding: "1rem", border: "1px solid var(--color-outline-variant)" }}>
             <p style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "4px" }}>Margin Keuntungan</p>
             <p style={{ fontSize: "20px", fontWeight: 700, color: profitMargin >= 20 ? "var(--color-income-green)" : "var(--color-warning-amber)" }}>{profitMargin}%</p>

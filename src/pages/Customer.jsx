@@ -12,6 +12,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import DropZoneImport from "../components/DropZoneImport";
 
 // Helper: normalisasi nomor telepon ke format wa.me
 // "0812345678" → "62812345678" (ganti 0 depan dengan 62, hapus non-digit)
@@ -31,6 +32,7 @@ export default function Customer() {
   const [importResult, setImportResult] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
+  const [query, setQuery] = useState("");
   const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
 
   const load = () => {
@@ -57,11 +59,33 @@ export default function Customer() {
         limit_kredit: Number(form.limit_kredit || 0),
       };
       if (editItem) {
+        const oldData = { ...editItem };
         await invoke("update_customer", { id: editItem.id, input });
-        addToast("Customer diperbarui", "success");
+        addToast("Customer diperbarui", "success", {
+          label: "Urungkan",
+          action: async () => {
+            await invoke("update_customer", {
+              id: oldData.id,
+              input: {
+                nama: oldData.nama,
+                telepon: oldData.telepon,
+                alamat: oldData.alamat,
+                deskripsi_tambahan: oldData.deskripsi_tambahan,
+                limit_kredit: oldData.limit_kredit,
+              },
+            });
+            load();
+          },
+        });
       } else {
-        await invoke("create_customer", { input });
-        addToast("Customer ditambahkan", "success");
+        const created = await invoke("create_customer", { input });
+        addToast("Customer ditambahkan", "success", {
+          label: "Urungkan",
+          action: async () => {
+            await invoke("delete_customer", { id: created.id });
+            load();
+          },
+        });
       }
       setShowForm(false);
       setEditItem(null);
@@ -87,41 +111,70 @@ export default function Customer() {
 
   const hapus = async (id) => {
     if (!window.confirm("Hapus customer ini?")) return;
+    const snapshot = list.find((c) => c.id === id);
+    if (!snapshot) return;
     try {
       await invoke("delete_customer", { id });
-      addToast("Customer terhapus", "success");
       setDetailItem(null);
       load();
+      addToast("Customer terhapus", "success", {
+        label: "Urungkan",
+        action: async () => {
+          await invoke("create_customer", {
+            input: {
+              nama: snapshot.nama,
+              telepon: snapshot.telepon,
+              alamat: snapshot.alamat,
+              deskripsi_tambahan: snapshot.deskripsi_tambahan,
+              limit_kredit: snapshot.limit_kredit,
+            },
+          });
+          load();
+        },
+      });
     } catch (err) {
       addToast(String(err), "error");
     }
   };
 
-  const copyPhone = async (telp) => {
-    if (!telp) {
+  const whatsappLink = (telp) => {
+    const num = waNumber(telp);
+    return num ? `https://wa.me/${num}` : "";
+  };
+
+  const copyWALink = async (telp) => {
+    const link = whatsappLink(telp);
+    if (!link) {
       addToast("Nomor telepon kosong", "error");
       return;
     }
     try {
-      await navigator.clipboard.writeText(telp);
-      addToast("Nomor telepon disalin", "success");
+      await navigator.clipboard.writeText(link);
+      addToast("Link WhatsApp disalin", "success");
     } catch (err) {
-      addToast(`Gagal salin nomor: ${err}`, "error");
+      addToast(`Gagal salin link WhatsApp: ${err}`, "error");
     }
   };
 
   const chatWA = async (telp) => {
-    const num = waNumber(telp);
-    if (!num) {
+    const link = whatsappLink(telp);
+    if (!link) {
       addToast("Nomor telepon kosong", "error");
       return;
     }
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(`whatsapp://send?phone=${num}`);
+      await openUrl(link);
     } catch (err) {
       addToast(`Gagal membuka WhatsApp: ${err}`, "error");
     }
+  };
+
+  const handleImportText = async (csvText) => {
+    const res = await invoke("import_customer_csv", { csvText });
+    setImportResult(res);
+    addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update`, "success");
+    load();
   };
 
   const handleImportCSV = async () => {
@@ -144,78 +197,50 @@ export default function Customer() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      {/* Header & Aksi Utama */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 className="text-headline-md">Daftar Customer</h2>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            setEditItem(null);
-            setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
-            setShowForm(true);
-          }}
-        >
-          + Tambah Customer
-        </button>
-        <button className="btn-primary" onClick={() => { setImportResult(null); setShowImportCSV(true); }}>
-          Impor CSV
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="loading-page"><div className="spinner" /></div>
-      ) : list.length === 0 ? (
-        <div className="empty-state" style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--color-text-tertiary)" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "48px" }}>group</span>
-          <p style={{ marginTop: "0.5rem" }}>Belum ada customer</p>
+    <div className="sales-page">
+      <header className="sales-page__header">
+        <div>
+          <p className="sales-page__eyebrow">MASTER DATA</p>
+          <h1 className="text-headline-lg">Daftar Pelanggan</h1>
+          <p className="text-body-md sales-page__subtitle">Menampilkan, menambah, mengubah, dan menghapus data pelanggan / customer.</p>
         </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", background: "var(--color-surface)", borderRadius: "12px", border: "1px solid var(--color-surface-border)", overflow: "hidden" }}>
-          {list.map((c) => (
-            <div
-              key={c.id}
-              className="list-dense-item"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "1rem",
-                borderBottom: "1px solid var(--color-surface-border)",
-                cursor: "pointer",
-              }}
-              onClick={() => setDetailItem(c)}
-            >
-              <div>
-                <p className="text-headline-sm" style={{ fontWeight: 700 }}>{c.nama}</p>
-                <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
-                  {c.telepon || "No Telepon"} · {c.alamat || "No Alamat"}
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="btn-icon"
-                  onClick={() => edit(c)}
-                  title="Edit"
-                >
-                  <span className="material-symbols-outlined">edit</span>
-                </button>
-                <button
-                  className="btn-icon"
-                  onClick={() => hapus(c.id)}
-                  style={{ color: "var(--color-expense-red)" }}
-                  title="Hapus"
-                >
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-            </div>
-          ))}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-secondary sales-page__add" onClick={() => { setImportResult(null); setShowImportCSV(true); }}><span className="material-symbols-outlined">upload_file</span>Impor CSV</button>
+          <button className="btn-primary sales-page__add" onClick={() => { setEditItem(null); setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 }); setShowForm(true); }}><span className="material-symbols-outlined">person_add</span>Tambah Pelanggan</button>
         </div>
-      )}
+      </header>
+
+      <section className="sales-stats">
+        <div className="sales-stat-card"><span className="material-symbols-outlined">group</span><div><span>Total Pelanggan</span><strong>{list.length}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">credit_card</span><div><span>Punya Limit Kredit</span><strong>{list.filter(c => Number(c.limit_kredit) > 0).length}</strong></div></div>
+        <div className="sales-stat-card"><span className="material-symbols-outlined">phone</span><div><span>Punya Telepon</span><strong>{list.filter(c => c.telepon).length}</strong></div></div>
+      </section>
+
+      <section className="sales-panel">
+        <div className="sales-panel__toolbar">
+          <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
+          <button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button>
+        </div>
+        {loading ? <div className="loading-page"><div className="spinner" /></div> :
+         list.filter(c => `${c.nama} ${c.telepon || ""} ${c.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).length === 0 ?
+          <div className="empty-state"><span className="material-symbols-outlined">group</span><p>Belum ada pelanggan</p></div> : (
+          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Pelanggan</th><th>Telepon</th><th>Alamat</th><th>Limit Kredit</th><th>Aksi</th></tr></thead><tbody>
+            {list.filter(c => `${c.nama} ${c.telepon || ""} ${c.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).map((c) => (
+              <tr key={c.id}>
+                <td><button className="sales-name" onClick={() => setDetailItem(c)}><span className="sales-avatar">{c.nama.charAt(0).toUpperCase()}</span><span><strong>{c.nama}</strong><small>{c.deskripsi_tambahan || "Pelanggan"}</small></span></button></td>
+                <td>{c.telepon || "-"}</td>
+                <td>{c.alamat || "-"}</td>
+                <td>{Number(c.limit_kredit) > 0 ? `Rp ${Number(c.limit_kredit).toLocaleString("id-ID")}` : "-"}</td>
+                <td><div className="sales-row-actions">
+                  {c.telepon && <button className="btn-icon" onClick={() => chatWA(c.telepon)} title="Chat WhatsApp" style={{ color: "#25D366" }}><span className="material-symbols-outlined">chat</span></button>}
+                  <button className="btn-icon" onClick={() => edit(c)} title="Edit"><span className="material-symbols-outlined">edit</span></button>
+                  <button className="btn-icon" onClick={() => hapus(c.id)} style={{ color: "var(--color-expense-red)" }} title="Hapus"><span className="material-symbols-outlined">delete</span></button>
+                </div></td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        )}
+      </section>
 
       {/* MODAL DETAIL CUSTOMER */}
       {detailItem && (
@@ -249,17 +274,12 @@ export default function Customer() {
               <div>
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Nomor Telepon</p>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <button
-                    className="btn-icon"
-                    type="button"
-                    onClick={() => copyPhone(detailItem.telepon)}
-                    disabled={!detailItem.telepon}
-                    title="Salin nomor telepon"
-                    style={{ width: 30, height: 30, minWidth: 30 }}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>content_copy</span>
-                  </button>
                   <p className="text-body-md">{detailItem.telepon || "-"}</p>
+                  {detailItem.telepon && (
+                    <button className="btn-icon" type="button" onClick={() => copyWALink(detailItem.telepon)} title="Salin link WhatsApp" style={{ width: 28, height: 28, minWidth: 28 }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 15 }}>content_copy</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <div>
@@ -297,9 +317,12 @@ export default function Customer() {
               Chat WhatsApp
             </button>
             {detailItem.telepon && (
-              <p className="text-label-md" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
-                wa.me/{waNumber(detailItem.telepon)}
-              </p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "var(--color-text-secondary)" }}>
+                <p className="text-label-md">{whatsappLink(detailItem.telepon)}</p>
+                <button className="btn-icon" type="button" onClick={() => copyWALink(detailItem.telepon)} title="Salin link WhatsApp" style={{ width: 28, height: 28, minWidth: 28 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 15 }}>content_copy</span>
+                </button>
+              </div>
             )}
 
             <button
@@ -371,11 +394,11 @@ export default function Customer() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
             <h3 className="text-headline-md">Import Customer CSV</h3>
             <p className="text-body-md" style={{ color: "var(--color-text-secondary)", margin: "0.25rem 0 1rem" }}>Unggah daftar customer dalam format CSV.</p>
-            <div className="card" style={{ background: "var(--color-surface-container-low)", border: "1px dashed var(--color-primary)", padding: "1.25rem", textAlign: "center", cursor: "pointer", marginBottom: "0.75rem" }} onClick={handleImportCSV}>
-              <span className="material-symbols-outlined" style={{ fontSize: "36px", color: "var(--color-primary)", marginBottom: "4px" }}>upload_file</span>
-              <p className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Pilih File CSV</p>
-              <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "2px" }}>Format: nama, telepon, alamat, deskripsi_tambahan</p>
-            </div>
+            <DropZoneImport
+              title="Pilih atau Drop File CSV di sini"
+              subtitle="Format: nama, telepon, alamat, deskripsi_tambahan"
+              onText={async (text) => { try { await handleImportText(text); } catch(e) { addToast(String(e), "error"); } }}
+            />
             {importResult && (
               <div className="card" style={{ padding: "0.75rem", background: "var(--color-surface-container-lowest)", marginBottom: "0.75rem" }}>
                 <h4 className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Hasil Import:</h4>

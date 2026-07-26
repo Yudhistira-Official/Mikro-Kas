@@ -9,10 +9,12 @@
 // Setiap navigasi & error dicatat ke file log via Rust logger.
 // ============================================================
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import Layout from "./components/Layout";
 import { ToastProvider } from "./hooks/useToast";
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "./utils/ipc";
+import DesktopLayout from "./layouts/DesktopLayout";
+import MobileLayout from "./layouts/MobileLayout";
+import { usePlatform } from "./layouts/usePlatform";
 
 // Android WebView pada perangkat ini crash saat memuat Vite dynamic chunks
 // (TypeError: z is not a function). Semua halaman memakai static import.
@@ -41,6 +43,23 @@ import Promo from "./pages/Promo";
 import Pesanan from "./pages/Pesanan";
 import RiwayatPembelian from "./pages/RiwayatPembelian";
 import Shift from "./pages/Shift";
+import AdvancedModules from "./pages/AdvancedModules";
+import UserManagement from "./pages/UserManagement";
+import NomorTransaksi from "./pages/NomorTransaksi";
+import PajakSetting from "./pages/PajakSetting";
+import Pengiriman from "./pages/Pengiriman";
+import Gudang from "./pages/Gudang";
+import SerialManagement from "./pages/SerialManagement";
+import Akuntansi from "./pages/Akuntansi";
+import SalesKomisi from "./pages/SalesKomisi";
+import PointPelanggan from "./pages/PointPelanggan";
+import Deposit from "./pages/Deposit";
+import TukarTambah from "./pages/TukarTambah";
+import Konsinyasi from "./pages/Konsinyasi";
+import Perakitan from "./pages/Perakitan";
+import HppManagement from "./pages/HppManagement";
+import DatabaseMaintenance from "./pages/DatabaseMaintenance";
+import MultiHarga from "./pages/MultiHarga";
 
 // ============================================================
 // Logger JS → Rust (fire-and-forget, tidak throw).
@@ -105,8 +124,11 @@ function RouteTracker() {
 }
 
 function App() {
-  const [tokoReady, setTokoReady] = useState(null); // null=loading
+  const platform = usePlatform();
+  const [tokoReady, setTokoReady] = useState(null);
   const [errorLog, setErrorLog] = useState("");
+  
+  const AppLayout = platform === "mobile" ? MobileLayout : DesktopLayout;
 
   const fetchToko = useCallback(() => {
     invoke("get_toko")
@@ -166,13 +188,15 @@ function App() {
     <ToastProvider>
       <RouteTracker />
       <Routes>
-        <Route element={<Layout />}>
+        <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/produk" element={<Produk />} />
           <Route path="/transaksi" element={<Transaksi />} />
           <Route path="/kas" element={<Kas />} />
-          <Route path="/qris" element={<Qris />} />
-          <Route path="/profile" element={<Profile />} />
+          <Route path="/qris" element={platform === "mobile" ? <Qris /> : <Navigate to="/" replace />} />
+          <Route path="/toko" element={<Profile />} />
+          <Route path="/qris-setup" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
+          <Route path="/profile" element={<Navigate to="/toko" replace />} />
           <Route path="/keuangan" element={<Keuangan />} />
           <Route path="/pembelian" element={<Pembelian />} />
           <Route path="/riwayat-pembelian" element={<RiwayatPembelian />} />
@@ -190,7 +214,24 @@ function App() {
           <Route path="/riwayat-stok" element={<RiwayatStok />} />
           <Route path="/shift" element={<Shift />} />
           <Route path="/stock-opname" element={<StockOpname />} />
-          <Route path="/toko" element={<TokoSetup />} />
+          <Route path="/advanced" element={<AdvancedModules />} />
+          <Route path="/qris-profil" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
+          <Route path="/users" element={<UserManagement />} />
+          <Route path="/nomor-transaksi" element={<NomorTransaksi />} />
+          <Route path="/pajak" element={<PajakSetting />} />
+          <Route path="/multi-harga" element={<MultiHarga />} />
+          <Route path="/pengiriman" element={<Pengiriman />} />
+          <Route path="/gudang" element={<Gudang />} />
+          <Route path="/serial" element={<SerialManagement />} />
+          <Route path="/akuntansi" element={<Akuntansi />} />
+          <Route path="/sales-komisi" element={<SalesKomisi />} />
+          <Route path="/point" element={<PointPelanggan />} />
+          <Route path="/deposit" element={<Deposit />} />
+          <Route path="/tukar-tambah" element={<TukarTambah />} />
+          <Route path="/konsinyasi" element={<Konsinyasi />} />
+          <Route path="/perakitan" element={<Perakitan />} />
+          <Route path="/hpp" element={<HppManagement />} />
+          <Route path="/database-maintenance" element={<DatabaseMaintenance />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
