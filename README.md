@@ -4,144 +4,190 @@
   <img src="public/logo-header.png" alt="Logo MikroKas" width="140" height="140" />
 </p>
 
-<p align="center"><strong>POS offline-first untuk UMKM: kasir, stok, QRIS, hutang/piutang, laporan, promo, shift, dan backup Android.</strong></p>
+<p align="center"><strong>POS offline-first untuk UMKM: kasir, stok, pembelian, penjualan, keuangan, QRIS, laporan, promo, dan operasional toko.</strong></p>
 
-MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React 19, Vite 7, Rust, dan SQLite lokal. Aplikasi dirancang offline-first: transaksi, produk, stok, pelanggan, supplier, QRIS, dan laporan tetap berjalan tanpa server.
-
-Logo aplikasi menggunakan asset Stitch project `Elegant Blue Color Palette` screen `MikroKas Logo`, disimpan lokal di `public/logo-header.png` agar README dan aplikasi tidak bergantung URL eksternal.
+MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite, Rust, dan SQLite lokal. Aplikasi dirancang offline-first: transaksi, produk, stok, pelanggan, supplier, pembayaran, komisi, dan laporan berjalan menggunakan database lokal tanpa server eksternal.
 
 ## Stack
 
-- Frontend: React 19 + Vite 7
+- Frontend: React + Vite
 - Backend: Tauri v2 + Rust
-- Database: SQLite lokal (`app_data_dir/mikrokas.db`)
-- Android: Tauri Android build, private app data, backup otomatis dimatikan
-- PDF: jsPDF + native Android PDF viewer handoff
-- QR/Barcode: jsQR untuk QRIS payload image, ZXing untuk barcode produk
+- Database: SQLite lokal pada `app_data_dir`
+- Desktop: Tauri desktop layout dengan sidebar
+- Android: Tauri Android layout dengan bottom navigation dan menu Lainnya
+- PDF: jsPDF + native viewer/share handoff
+- Barcode/QR: ZXing, jsQR, QRIS TLV/CRC parser
+- Printer: ESC/POS thermal printer melalui device USB/COM yang tersedia
 
-## Pembaruan Fitur
+## Fitur
 
-- Kasir/POS penjualan dengan stok otomatis, diskon nominal/persen, pajak, biaya layanan, ongkir, customer opsional, metode bayar Tunai/QRIS/Transfer.
-- Scan barcode native Android untuk kasir:
-  - Tombol scan lama tetap dipakai.
-  - Popup muncul lalu langsung membuka kamera bawaan HP.
-  - Tidak ada galeri, tidak ada input SKU manual.
-  - Hasil foto dikembalikan ke MikroKas sebagai base64 dan didekode ZXing.
-  - Jika SKU tidak ada, muncul popup `SKU tidak ada dalam database` dengan value SKU terbaca.
-- Scan barcode native Android untuk Tambah Produk/Edit Produk:
-  - Field SKU punya tombol scan yang sama.
-  - Hasil barcode otomatis mengisi SKU produk.
-- Popup scanner memakai `createPortal` + event stopPropagation agar klik di popup tidak menambah barang di belakang.
-- Manajemen produk:
-  - Foto produk private storage.
-  - Kategori dan supplier.
-  - Harga diskon promo dan tanggal berlaku.
-  - Multi-satuan berbasis JSON ringan.
-  - Barcode SVG generator dari SKU.
-  - CSV import produk.
-- Stock opname batch dengan audit penyesuaian stok.
-- Pembelian/restock supplier, riwayat pembelian, catatan harga supplier, dan DP pembelian.
-- Pesanan customer dengan DP/uang muka.
-- Hutang/piutang dengan jatuh tempo, limit kredit customer, dan reminder.
-- Promo lokal offline-first: BxGY, Tebus Murah, Minimum Belanja.
-- PIN kasir/security gate untuk aksi sensitif.
-- Shift management kasir.
-- Dashboard ringkasan pemasukan, pengeluaran, transaksi, laba, stok rendah, produk terlaris.
-- Keuangan toko: pemasukan penjualan otomatis, pengeluaran manual, pembelian, retur, cashflow.
-- QRIS dinamis lokal dari QRIS statis merchant, multi profil merchant, konfirmasi manual pembayaran, prune riwayat harian.
-- Laporan multi-tab: penjualan, inventori, pelanggan, pembelian, pengeluaran, margin, PDF, CSV/share fallback.
-- Backup/restore database via native file picker.
-- Log aplikasi internal untuk debugging Android APK.
-- Android release mencegah restore data lama: `allowBackup=false`, `fullBackupContent=false`.
+### Dashboard
+
+- Ringkasan penjualan kotor, retur, penjualan bersih, laba kotor, keuntungan bersih, margin, transaksi, dan pengeluaran.
+- Produk terlaris, stok rendah, tren penjualan, dan transaksi terbaru.
+- Filter periode laporan.
+
+### Master Data
+
+- **Daftar Item / Barang**: CRUD produk, SKU, barcode, kategori, supplier, foto, harga jual, harga diskon, stok minimum, satuan multi, dan import CSV.
+- **Daftar Supplier**: CRUD supplier, kontak WhatsApp, detail supplier, salin link WhatsApp, dan catatan harga supplier per produk.
+- **Daftar Pelanggan**: CRUD pelanggan, limit kredit, kontak WhatsApp, detail pelanggan, salin link WhatsApp, dan import CSV.
+- **Daftar Sales**: CRUD sales, kode, telepon, email, komisi terutang, histori periode, dan pembayaran komisi.
+- **Departemen / Gudang**: CRUD gudang, gudang default, alamat, status aktif, dan kontrol lokasi stok.
+- **Point Pelanggan**: nilai rupiah per point, masa berlaku, minimum penukaran, dan simulasi point.
+- **Periode Promosi**: Minimum Belanja, Beli X Gratis Y, dan Tebus Murah dengan preview aturan.
+- **Harga Multi Level**: kalkulator diskon bertingkat dan pengecekan harga jual produk.
+
+### Kasir dan Penjualan
+
+- Kasir/POS dengan pencarian produk, tampilan kartu/list, cart, perubahan qty, multi-satuan, customer, diskon, pajak, service charge, ongkir, dan total bayar.
+- Metode pembayaran Tunai, QRIS, dan Transfer.
+- Validasi uang diterima, kembalian, fokus keyboard `End`, dan submit dengan `Enter`.
+- Konfirmasi cetak faktur setelah transaksi tersimpan.
+- Toast sukses dengan aksi **Urungkan** dan shortcut `Ctrl+Z`.
+- Reorder transaksi dari riwayat.
+- Pesanan penjualan, retur, tukar tambah, dan pengiriman.
+- WhatsApp customer/supplier dibuka melalui browser default desktop.
+
+### Pembelian dan Stok
+
+- Pembelian/restock supplier, DP, riwayat pembelian, dan catatan harga supplier.
+- Stock opname dengan audit penyesuaian.
+- Riwayat stok.
+- Serial number: tambah, status, transaksi terkait, dan hapus.
+- HPP FIFO/LIFO: tambah batch stok dan kalkulasi harga pokok.
+- Perakitan BOM: daftar BOM, komponen, dan proses perakitan.
+- Konsinyasi masuk dan keluar.
+
+### Keuangan dan Akuntansi
+
+- Keuangan toko: pemasukan, pengeluaran, pembelian, retur, dan cashflow.
+- Kas dan Cashbox: saldo, mutasi, dan riwayat kas.
+- Shift kasir: buka shift, saldo awal, tutup shift, saldo akhir, selisih, dan riwayat.
+- Hutang/piutang, jatuh tempo, limit kredit, pembayaran, dan deposit pelanggan.
+- Daftar COA, jurnal manual, neraca saldo, dan pemeriksaan jurnal tidak seimbang.
+- Komisi sales terutang dan pembayaran komisi.
+
+### QRIS dan Printer
+
+- QRIS dinamis dari QRIS statis merchant.
+- Multi profil QRIS dan pemilihan profil aktif.
+- Status, konfirmasi manual, expiry, dan riwayat QRIS.
+- Cetak faktur/struk ESC/POS untuk printer thermal 58mm.
+- Desktop mencoba device printer USB/COM umum lintas Windows dan Linux; driver printer tetap diperlukan.
+
+### Pengaturan Toko
+
+- **Profil Perusahaan**: nama toko/perusahaan, alamat, telepon, email, website, NPWP, deskripsi usaha, dan QRIS statis.
+- **Profil QRIS Pembayaran**: profil QRIS statis multi-merchant untuk perangkat mobile.
+- User dan role, PIN kasir, reset password, dan status user.
+- Setting nomor transaksi dan generate nomor transaksi.
+- Pengaturan PPN: mode non/include/exclude, tarif, dan kalkulasi preview.
+- Backup/restore database melalui native file picker.
+- Maintenance database SQLite.
+- Log sistem dengan viewer, refresh, copy, dan export.
+
+## UX dan Navigasi
+
+- Desktop memakai sidebar berdasarkan kelompok kerja: Utama, Master Data, Pembelian, Penjualan, Perakitan, Konsinyasi, Persediaan, Akuntansi, Laporan, dan Pengaturan.
+- Sidebar desktop memiliki pencarian fitur berdasarkan judul dan deskripsi tersembunyi.
+- Android memakai bottom navigation dan menu **Lainnya** berbentuk titik tiga.
+- Form penting menggunakan modal, label penjelas, preview hasil, empty state, loading state, validasi input, dan toast feedback.
+- Operasi CRUD utama menyediakan aksi **Urungkan** pada notifikasi bila backend mendukung reverse operation.
+- UI responsif dan mengikuti design token warna MikroKas: violet primary, cyan secondary, amber tertiary, surface putih bersih.
 
 ## Keamanan Data
 
-- Database tidak dibundel di APK.
-- Data runtime disimpan di app private data Android.
-- Tidak ada `.env`, database lokal, backup, keystore, APK/AAB, token, credential, atau file pribadi yang boleh masuk commit.
-- APK/AAB build output tetap artifact lokal, bukan source code repo.
-- SQLite fallback publik/temp dihindari; DB berjalan di private app data.
+- Database runtime disimpan di private app data melalui `app_data_dir`.
+- Database lokal, backup, log runtime, token, credential, private key, keystore, APK/AAB, dan file pribadi tidak boleh masuk repository.
+- `.env`, keystore Android, target build, log, dan state agent diabaikan oleh `.gitignore`.
+- Password user di-hash di backend.
+- Input backend divalidasi dan query database menggunakan parameter.
+- Android backup otomatis dinonaktifkan melalui konfigurasi aplikasi.
+
+## Menjalankan Project
+
+### Frontend
+
+```bash
+npm install
+npm run dev
+```
+
+### Desktop Tauri
+
+```bash
+npm run tauri dev
+```
+
+### Build Frontend
+
+```bash
+npm run build
+```
+
+### Verifikasi Backend
+
+```bash
+cd src-tauri
+cargo check
+cargo test
+```
 
 ## Struktur Project
 
 ```text
 MikroKas/
 ├── public/
-│   └── logo-header.png                 # Logo MikroKas dari Stitch, dipakai README + UI
+│   └── logo-header.png
 ├── src/
 │   ├── components/
-│   │   ├── BarcodeScanner.jsx          # Popup native camera bridge + ZXing decode
-│   │   ├── Layout.jsx                  # Header, nav bawah, layout mobile
-│   │   └── PinGate.jsx                 # Modal verifikasi PIN kasir
-│   ├── hooks/
-│   │   └── useToast.js                 # Toast app
+│   │   ├── AdvancedCrudPage.jsx
+│   │   ├── BarcodeScanner.jsx
+│   │   ├── DropZoneImport.jsx
+│   │   ├── PinGate.jsx
+│   │   └── desktop/Sidebar.jsx
+│   ├── hooks/useToast.jsx
+│   ├── layouts/
+│   │   ├── DesktopLayout.jsx
+│   │   ├── MobileLayout.jsx
+│   │   └── usePlatform.js
 │   ├── pages/
-│   │   ├── Dashboard.jsx               # Ringkasan toko
-│   │   ├── Transaksi.jsx               # Kasir/POS + scanner barcode
-│   │   ├── Produk.jsx                  # CRUD produk + scan SKU + barcode SVG
-│   │   ├── StockOpname.jsx             # Opname stok batch
-│   │   ├── Pembelian.jsx               # Pembelian/restock supplier
-│   │   ├── RiwayatPembelian.jsx        # Riwayat pembelian
-│   │   ├── RiwayatStok.jsx             # Audit stok
-│   │   ├── Customer.jsx                # Customer + limit kredit
-│   │   ├── Supplier.jsx                # Supplier + kontak WhatsApp
-│   │   ├── Pesanan.jsx                 # Pesanan customer + DP
-│   │   ├── HutangPiutang.jsx           # Hutang/piutang + jatuh tempo
-│   │   ├── Promo.jsx                   # Promo localStorage offline-first
-│   │   ├── Shift.jsx                   # Shift management kasir
-│   │   ├── Keuangan.jsx                # Cashflow toko
-│   │   ├── Laporan.jsx                 # Laporan PDF/CSV multi-tab
-│   │   ├── Qris.jsx                    # QRIS dinamis + history
-│   │   ├── BackupRestore.jsx           # Backup/restore native picker
-│   │   ├── Log.jsx                     # Viewer log aplikasi
-│   │   ├── Profile.jsx                 # Hub menu sekunder
-│   │   └── TokoSetup.jsx               # Setup toko awal
-│   ├── styles/
-│   │   └── global.css                  # Design token, mobile UI, modal, nav
-│   ├── utils/
-│   │   ├── barcode.js                  # Generate barcode SVG Code128
-│   │   └── ipc.js                      # Wrapper invoke + logging IPC
-│   └── App.jsx                         # Router + diagnostic wiring
+│   │   ├── Dashboard.jsx
+│   │   ├── Transaksi.jsx
+│   │   ├── Produk.jsx
+│   │   ├── Customer.jsx
+│   │   ├── Supplier.jsx
+│   │   ├── SalesKomisi.jsx
+│   │   ├── Gudang.jsx
+│   │   ├── Pembelian.jsx
+│   │   ├── Pengiriman.jsx
+│   │   ├── TukarTambah.jsx
+│   │   ├── Konsinyasi.jsx
+│   │   ├── SerialManagement.jsx
+│   │   ├── HppManagement.jsx
+│   │   ├── Perakitan.jsx
+│   │   ├── Shift.jsx
+│   │   ├── Cashbox.jsx
+│   │   ├── Akuntansi.jsx
+│   │   ├── Deposit.jsx
+│   │   ├── Laporan.jsx
+│   │   ├── TokoSetup.jsx
+│   │   ├── Profile.jsx
+│   │   └── ...
+│   ├── styles/global.css
+│   ├── utils/ipc.js
+│   └── App.jsx
 ├── src-tauri/
-│   ├── capabilities/
-│   │   └── default.json                # Permission Tauri plugins
-│   ├── gen/android/
-│   │   └── app/src/main/
-│   │       ├── AndroidManifest.xml     # Android permission + allowBackup false
-│   │       └── java/.../MainActivity.kt# Camera bridge + PDF/share helpers
 │   ├── migrations/
-│   │   ├── 005_fitur_pos_kasgo.sql
-│   │   ├── 006_hutang_piutang_jatuh_tempo.sql
-│   │   ├── 007_produk_harga_diskon.sql
-│   │   ├── 008_pesanan_customer_dp.sql
-│   │   ├── 009_pembelian_supplier_dp.sql
-│   │   ├── 010_produk_satuan_multi.sql
-│   │   ├── 011_shift_management.sql
-│   │   ├── 012_kasir_pin.sql
-│   │   ├── 013_limit_kredit.sql
-│   │   └── 014_catatan_harga_supplier.sql
-│   └── src/
-│       ├── commands/
-│       │   ├── produk_cmd.rs           # Produk, kategori, foto, import, stock audit
-│       │   ├── transaksi_cmd.rs        # Penjualan, pembelian, retur, laporan
-│       │   ├── customer_cmd.rs         # Customer + limit kredit
-│       │   ├── supplier_cmd.rs         # Supplier CRUD
-│       │   ├── hutang_piutang_cmd.rs   # Hutang/piutang
-│       │   ├── pesanan_cmd.rs          # Pesanan customer + DP
-│       │   ├── shift_cmd.rs            # Shift kasir
-│       │   ├── pin_cmd.rs              # PIN security
-│       │   ├── harga_supplier_cmd.rs   # Harga supplier per produk
-│       │   ├── dashboard_cmd.rs        # Aggregasi dashboard
-│       │   ├── kas_cmd.rs              # Keuangan/cashflow
-│       │   ├── qris_cmd.rs             # QRIS log/status
-│       │   ├── file_cmd.rs             # Backup/restore/PDF temp
-│       │   └── log_cmd.rs              # Log internal APK
-│       ├── models/                     # Struct serializable untuk frontend
-│       ├── db.rs                       # Init SQLite + migrasi idempotent
-│       ├── logger.rs                   # File logger internal
-│       ├── pdf_plugin.rs               # Buka PDF native Android
-│       └── lib.rs                      # Tauri builder + command registry
+│   ├── src/commands/
+│   ├── src/models/
+│   ├── src/db.rs
+│   └── src/lib.rs
 ├── package.json
-├── vite.config.js
 └── README.md
 ```
+
+## Lisensi
+
+Project internal MikroKas. Pastikan data operasional dan credential tidak dibagikan ke repository publik.
