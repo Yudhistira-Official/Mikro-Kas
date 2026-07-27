@@ -1,0 +1,2 @@
+-- Migration 036: Header BOM lengkap untuk yield dan gudang sumber.
+-- Item bahan baku sudah disediakan oleh migrasi 031.

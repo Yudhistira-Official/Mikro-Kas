@@ -2,7 +2,7 @@
 -- Replaces simple PIN kasir with full user management (username, password hash, role)
 -- Roles: admin (full access), supervisor (all except user mgmt), kasir (POS only)
 -- Password: bcrypt hash for security
--- Session: managed in-memory by frontend (8h timeout)
+-- Session: managed in process memory by the Rust application; restart requires login
 
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

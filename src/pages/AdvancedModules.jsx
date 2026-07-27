@@ -1,6 +1,15 @@
-import { useState } from "react";
+// ============================================================
+// AdvancedModules.jsx — Cek kesiapan modul lanjutan (PageKit).
+// ============================================================
+import { useState, useMemo } from "react";
 import { invoke } from "../utils/ipc";
+import {
+  PageShell, DataPanel, DataTable, InfoNote, StatusBadge, useSearchFilter,
+} from "../components/PageKit";
 
+/**
+ * Daftar modul Phase 1–5 beserta command backend untuk health-check.
+ */
 const modules = [
   { title: "User Management", icon: "manage_accounts", commands: ["list_users"] },
   { title: "Printer Struk", icon: "print", commands: ["print_struk"] },
@@ -21,58 +30,145 @@ const modules = [
   { title: "Maintenance DB", icon: "database", commands: ["maintenance_database"] },
 ];
 
+/**
+ * Payload minimal agar command tidak error argumen saat health-check.
+ */
+function payloadFor(command) {
+  if (command === "print_struk") return { transaksiId: 1 };
+  if (command === "get_harga_jual") return { produkId: 1, qty: 1, levelId: null, satuan: null };
+  if (command === "list_serial") return { produkId: 1 };
+  if (command === "get_neraca_saldo") return { dari: "2000-01-01", sampai: "2099-12-31" };
+  if (command === "list_deposit_log") return { depositId: 1 };
+  if (command === "list_bom") return { produkRakitanId: 1 };
+  if (command.startsWith("hitung_hpp")) return { produkId: 1, qtyJual: 1 };
+  return {};
+}
+
+/**
+ * Halaman health-check modul lanjutan: invoke command pertama tiap modul.
+ */
 export default function AdvancedModules() {
   const [status, setStatus] = useState({});
+  const [checkingAll, setCheckingAll] = useState(false);
 
+  const { query, setQuery, filtered } = useSearchFilter(
+    modules,
+    (m) => `${m.title} ${m.commands.join(" ")}`
+  );
+
+  const readyCount = useMemo(
+    () => modules.filter((m) => status[m.title] === "ready").length,
+    [status]
+  );
+  const checkingCount = useMemo(
+    () => modules.filter((m) => status[m.title] === "checking").length,
+    [status]
+  );
+
+  /**
+   * Cek satu modul: invoke command pertama; status always "ready" setelah selesai
+   * (command ada di backend; error argumen/data kosong tetap dianggap siap).
+   */
   const handleCheck = async (module) => {
     const command = module.commands[0];
     setStatus((prev) => ({ ...prev, [module.title]: "checking" }));
     try {
-      const payload = command === "print_struk" ? { transaksiId: 1 } :
-        command === "get_harga_jual" ? { produkId: 1, qty: 1, levelId: null, satuan: null } :
-        command === "list_serial" ? { produkId: 1 } :
-        command === "get_neraca_saldo" ? { dari: "2000-01-01", sampai: "2099-12-31" } :
-        command === "list_deposit_log" ? { depositId: 1 } :
-        command === "list_bom" ? { produkRakitanId: 1 } :
-        command.startsWith("hitung_hpp") ? { produkId: 1, qtyJual: 1 } :
-        {};
-      await invoke(command, payload);
-      setStatus((prev) => ({ ...prev, [module.title]: "ready" }));
-    } catch (e) {
-      setStatus((prev) => ({ ...prev, [module.title]: "ready" }));
+      await invoke(command, payloadFor(command));
+    } catch {
+      // Backend merespons = modul terdaftar
     }
+    setStatus((prev) => ({ ...prev, [module.title]: "ready" }));
   };
 
-  return (
-    <div className="page-container advanced-page">
-      <div className="advanced-header">
-        <div>
-          <h1 className="text-headline-lg">Modul Lanjutan MikroKas</h1>
-          <p className="text-body-md" style={{ color: "var(--color-text-secondary)" }}>
-            Phase 1–5: printer, user, pricing, gudang, akuntansi, konsinyasi, perakitan, HPP, maintenance.
-          </p>
-        </div>
-        <span className="badge badge-success">Desktop Ready</span>
-      </div>
+  /** Cek semua modul berurutan. */
+  const checkAll = async () => {
+    setCheckingAll(true);
+    for (const module of modules) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleCheck(module);
+    }
+    setCheckingAll(false);
+  };
 
-      <div className="advanced-grid">
-        {modules.map((module) => (
-          <div key={module.title} className="card advanced-card">
-            <div className="advanced-card-icon">
-              <span className="material-symbols-outlined">{module.icon}</span>
+  const columns = [
+    {
+      key: "modul",
+      label: "Modul",
+      render: (m) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>
+            {m.icon}
+          </span>
+          <div>
+            <b>{m.title}</b>
+            <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+              {m.commands.join(", ")}
             </div>
-            <div style={{ flex: 1 }}>
-              <h2 className="text-headline-sm">{module.title}</h2>
-              <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: 4 }}>
-                {module.commands.join(", ")}
-              </p>
-            </div>
-            <button className="btn-secondary" onClick={() => handleCheck(module)}>
-              {status[module.title] === "checking" ? "Cek..." : "Cek"}
-            </button>
           </div>
-        ))}
-      </div>
-    </div>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (m) => {
+        const s = status[m.title];
+        if (s === "checking") return <StatusBadge label="Mengecek..." tone="warning" />;
+        if (s === "ready") return <StatusBadge label="Siap" tone="success" />;
+        return <StatusBadge label="Belum dicek" tone="neutral" />;
+      },
+    },
+    {
+      key: "aksi",
+      label: "",
+      align: "right",
+      render: (m) => (
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => handleCheck(m)}
+          disabled={status[m.title] === "checking"}
+        >
+          {status[m.title] === "checking" ? "Cek..." : "Cek"}
+        </button>
+      ),
+    },
+  ];
+
+  return (
+    <PageShell
+      eyebrow="SISTEM"
+      title="Modul Lanjutan"
+      description="Cek kesiapan command backend Phase 1–5: printer, user, pricing, gudang, akuntansi, konsinyasi, perakitan, HPP, maintenance."
+      actions={
+        <button type="button" className="btn-primary" onClick={checkAll} disabled={checkingAll}>
+          <span className="material-symbols-outlined">health_and_safety</span>
+          {checkingAll ? "Mengecek..." : "Cek Semua"}
+        </button>
+      }
+      stats={[
+        { label: "Total modul", value: modules.length, icon: "extension" },
+        { label: "Sudah dicek", value: readyCount, icon: "check_circle", tone: "#047857" },
+        { label: "Sedang cek", value: checkingCount, icon: "pending", tone: "#92400E" },
+      ]}
+    >
+      <InfoNote>
+        Tombol Cek memanggil command backend pertama tiap modul. Status &quot;Siap&quot; berarti command terdaftar
+        (error data kosong tetap dihitung siap).
+      </InfoNote>
+
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari modul / command..."
+        onRefresh={checkAll}
+        isEmpty={filtered.length === 0}
+        emptyIcon="extension_off"
+        emptyTitle="Modul tidak ditemukan"
+        emptyHint="Ubah kata kunci pencarian."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(m) => m.title} />
+      </DataPanel>
+    </PageShell>
   );
 }

@@ -27,8 +27,9 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/mikrokas"));
             logger::init_logger(app_dir.clone());
             logger::log("APP: setup dimulai");
-            let conn = db::init_db(app_dir);
+            let conn = db::init_db(app_dir).map_err(anyhow::Error::msg)?;
             app.manage(db::DbState(std::sync::Mutex::new(conn)));
+            app.manage(commands::user_cmd::AuthState(std::sync::Mutex::new(None)));
             logger::log("APP: setup selesai");
             Ok(())
         })
@@ -36,6 +37,7 @@ pub fn run() {
             // Profil toko
             commands::toko_cmd::get_toko,
             commands::toko_cmd::save_toko,
+            commands::toko_cmd::save_toko_foto,
             // Kategori produk
             commands::kategori_cmd::list_kategori,
             commands::kategori_cmd::create_kategori,
@@ -50,6 +52,7 @@ pub fn run() {
             commands::produk_cmd::list_produk_low_stock,
             commands::produk_cmd::adjust_stock,
             commands::produk_cmd::list_stock_adjustments,
+            commands::produk_cmd::reverse_stock_adjustment,
             commands::produk_cmd::import_produk_csv,
             commands::produk_cmd::save_produk_foto,
             commands::produk_cmd::delete_produk_foto,
@@ -68,6 +71,7 @@ pub fn run() {
             commands::shift_cmd::list_shift,
             commands::shift_cmd::buka_shift,
             commands::shift_cmd::tutup_shift,
+            commands::shift_cmd::get_shift_cash_count,
             commands::dashboard_cmd::get_total_retur,
             commands::transaksi_cmd::get_transaksi_detail,
             commands::transaksi_cmd::edit_transaksi_penjualan,
@@ -147,6 +151,9 @@ pub fn run() {
             commands::transaksi_cmd::list_retur,
             commands::transaksi_cmd::get_retur_detail,
             commands::transaksi_cmd::update_retur_penjualan,
+            // Daftar Penjualan Sales
+            commands::transaksi_cmd::list_penjualan_sales,
+            commands::transaksi_cmd::summary_penjualan_sales,
             // Backup/Restore
             commands::file_cmd::backup_database,
             commands::file_cmd::backup_database_to,
@@ -156,10 +163,18 @@ pub fn run() {
             // Multi User & Role
             commands::user_cmd::create_user,
             commands::user_cmd::login_user,
+            commands::user_cmd::get_current_user,
+            commands::user_cmd::logout_user,
             commands::user_cmd::list_users,
             commands::user_cmd::deactivate_user,
             commands::user_cmd::reset_password,
+            commands::user_cmd::update_user,
             commands::user_cmd::log_user_action,
+            // Security questions (lupa password)
+            commands::user_cmd::set_security_questions,
+            commands::user_cmd::get_security_questions_admin,
+            commands::user_cmd::get_security_questions_public,
+            commands::user_cmd::verify_security_answers,
             // Transaction numbering
             commands::nomor_cmd::list_nomor_settings,
             commands::nomor_cmd::update_nomor_setting,
@@ -180,14 +195,17 @@ pub fn run() {
             commands::gudang_cmd::create_gudang,
             commands::gudang_cmd::update_gudang,
             commands::gudang_cmd::delete_gudang,
+            commands::gudang_cmd::hapus_gudang_permanen,
             commands::gudang_cmd::get_stok_per_gudang,
             commands::gudang_cmd::transfer_stok,
             commands::gudang_cmd::list_transfer_stok,
             // Phase 3: Serial number
             commands::serial_cmd::list_serial,
+            commands::serial_cmd::check_serial_number,
             commands::serial_cmd::add_serial,
             commands::serial_cmd::update_serial_status,
             commands::serial_cmd::delete_serial,
+            commands::serial_cmd::finalize_serial_transaction,
             // Phase 4-5: Akuntansi double-entry
             commands::akuntansi_cmd::list_coa,
             commands::akuntansi_cmd::create_coa,
@@ -217,8 +235,10 @@ pub fn run() {
             // Phase 4-5: Konsinyasi
             commands::konsinyasi_cmd::create_konsinyasi_masuk,
             commands::konsinyasi_cmd::list_konsinyasi_masuk,
+            commands::konsinyasi_cmd::list_konsinyasi_masuk_item,
             commands::konsinyasi_cmd::create_konsinyasi_keluar,
             commands::konsinyasi_cmd::list_konsinyasi_keluar,
+            commands::konsinyasi_cmd::list_konsinyasi_keluar_item,
             // Phase 4-5: Perakitan & BOM
             commands::perakitan_cmd::create_bom,
             commands::perakitan_cmd::list_bom,
@@ -232,6 +252,7 @@ pub fn run() {
             // Phase 1-2: Printer, display, pricing, export, pengiriman
             commands::printer_cmd::build_struk_text,
             commands::printer_cmd::print_struk,
+            commands::printer_cmd::list_printer_candidates,
             commands::customer_display_cmd::get_customer_display_data,
             commands::pricing_cmd::hitung_diskon_bertingkat,
             commands::pricing_cmd::get_harga_jual,
@@ -241,6 +262,11 @@ pub fn run() {
             commands::pengiriman_cmd::create_pengiriman,
             commands::pengiriman_cmd::update_pengiriman_status,
             commands::pengiriman_cmd::list_pengiriman,
+            // Stock opname
+            commands::stock_opname_cmd::create_stock_opname,
+            commands::stock_opname_cmd::list_stock_opname,
+            commands::stock_opname_cmd::get_stock_opname,
+            commands::stock_opname_cmd::export_stock_opname_docx,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MikroKas");

@@ -8,10 +8,11 @@ import { invoke } from "../utils/ipc";
  * PinGate — Wrapper yang menampilkan modal PIN sebelum children bisa diakses.
  * @param {object} props
  * @param {function} props.onSuccess — dipanggil setelah PIN valid.
+ * @param {function} props.onCancel — dipanggil saat user menutup gate tanpa checkout.
  * @param {string} props.role — role yang diminta (default: "kasir").
  * @param {React.ReactNode} props.children — konten yang dilindungi PIN.
  */
-export default function PinGate({ onSuccess, role = "kasir", children }) {
+export default function PinGate({ onSuccess, onCancel, role = "kasir", autoSuccess = false, children }) {
   const [pins, setPins] = useState([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +28,19 @@ export default function PinGate({ onSuccess, role = "kasir", children }) {
       .catch(() => setLoading(false));
   }, []);
 
+  // Escape membatalkan gate PIN tanpa memanggil checkout atau mengubah form.
+  useEffect(() => {
+    const handleEscape = (event) => { if (event.key === "Escape" && !loading) { event.preventDefault(); onCancel?.(); } };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [loading, onSuccess]);
+
   // Jika tidak ada PIN aktif, langsung izinkan akses
+  useEffect(() => {
+    if (!loading && pins.length === 0 && autoSuccess) {
+      onSuccess?.("");
+    }
+  }, [loading, pins.length, onSuccess, autoSuccess]);
   if (!loading && pins.length === 0) {
     return <>{children}</>;
   }
@@ -42,7 +55,7 @@ export default function PinGate({ onSuccess, role = "kasir", children }) {
       .then((ok) => {
         if (ok) {
           setInput("");
-          onSuccess?.();
+           onSuccess?.(input);
         } else {
           setError("PIN salah");
           setInput("");
@@ -57,12 +70,13 @@ export default function PinGate({ onSuccess, role = "kasir", children }) {
       background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center",
       justifyContent: "center", zIndex: 9999, backdropFilter: "blur(4px)"
     }}>
-      <div style={{
-        background: "var(--color-surface)", borderRadius: "20px", padding: "2rem",
+       <div style={{
+         background: "var(--color-surface)", borderRadius: "20px", padding: "2rem", position: "relative",
         width: "320px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-        border: "1px solid var(--color-outline-variant)", textAlign: "center"
-      }}>
-        <div style={{
+border: "1px solid var(--color-outline-variant)", textAlign: "center"
+         }}>
+         <button type="button" aria-label="Tutup" onClick={onCancel} style={{ position: "absolute", top: 10, right: 10, border: 0, background: "transparent", cursor: "pointer", color: "var(--color-text-secondary)" }}><span className="material-symbols-outlined" style={{ fontSize: 22 }}>close</span></button>
+         <div style={{
           width: "60px", height: "60px", borderRadius: "50%",
           background: "linear-gradient(135deg, var(--color-primary), var(--color-secondary))",
           display: "flex", alignItems: "center", justifyContent: "center",

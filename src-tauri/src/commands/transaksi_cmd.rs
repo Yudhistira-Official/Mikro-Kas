@@ -52,6 +52,7 @@ pub fn buat_transaksi_penjualan(
     pajak_nominal: Option<i64>,
     biaya_layanan: Option<i64>,
     ongkir: Option<i64>,
+    sales_id: Option<i64>,
 ) -> Result<TransaksiResult, String> {
     crate::logger::log(&format!(
         "COMMAND: buat_transaksi_penjualan dipanggil; items_count={}, metode_bayar={}",
@@ -81,7 +82,12 @@ pub fn buat_transaksi_penjualan(
 
         let mut harga_jual = harga_base;
         let mut qty_stok = item.qty;
-        if let Some(unit) = item.satuan_pilihan.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(unit) = item
+            .satuan_pilihan
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             let rules: Vec<SatuanRule> = satuan_multi
                 .as_deref()
                 .and_then(|raw| serde_json::from_str(raw).ok())
@@ -133,9 +139,9 @@ pub fn buat_transaksi_penjualan(
     };
 
     tx.execute(
-        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, pajak_nominal, biaya_layanan, ongkir)
-         VALUES ('penjualan', ?1, ?2, ?3, ?4, ?5, ?6)",
-        params![total_final, metode_bayar, catatan_final, pajak, biaya, ongkir_val],
+        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, pajak_nominal, biaya_layanan, ongkir, sales_id)
+         VALUES ('penjualan', ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![total_final, metode_bayar, catatan_final, pajak, biaya, ongkir_val, sales_id],
     )
     .map_err(|e| e.to_string())?;
     let transaksi_id: i64 = tx.last_insert_rowid();
@@ -172,7 +178,10 @@ pub fn buat_transaksi_pembelian(
     let mut item_rows = Vec::new();
 
     for item in &items {
-        let (harga_beli, _stok, nama) = tx
+        if item.qty <= 0 {
+            return Err("Qty restock harus lebih dari 0".into());
+        }
+        let (harga_master, _stok, nama) = tx
             .query_row(
                 "SELECT harga_beli, stok, nama FROM produk WHERE id = ?1 AND is_active = 1",
                 params![item.produk_id],
@@ -186,6 +195,21 @@ pub fn buat_transaksi_pembelian(
             )
             .map_err(|_| format!("Produk ID {} tidak ditemukan", item.produk_id))?;
 
+        // Harga beli restock: override dari UI jika ada, else harga master.
+        let harga_beli = match item.harga_beli {
+            Some(h) if h < 0 => return Err(format!("Harga beli {} tidak valid", nama)),
+            Some(h) => h,
+            None => harga_master,
+        };
+        // Sync master harga_beli bila berubah saat restock.
+        if harga_beli != harga_master {
+            tx.execute(
+                "UPDATE produk SET harga_beli = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![harga_beli, item.produk_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
         let subtotal = harga_beli * item.qty;
         total += subtotal;
         item_rows.push((item.produk_id, item.qty, harga_beli, subtotal, nama));
@@ -195,11 +219,15 @@ pub fn buat_transaksi_pembelian(
     let dp = dp_nominal.unwrap_or(total).max(0).min(total);
     let sisa_hutang = total - dp;
     let catatan_final = match (catatan, supplier_id, sisa_hutang > 0) {
-        (Some(c), Some(sid), true) => Some(format!("{c} | supplier_id={sid} | dp={dp} | hutang={sisa_hutang}")),
+        (Some(c), Some(sid), true) => Some(format!(
+            "{c} | supplier_id={sid} | dp={dp} | hutang={sisa_hutang}"
+        )),
         (Some(c), Some(sid), false) => Some(format!("{c} | supplier_id={sid} | dp={dp}")),
         (Some(c), None, true) => Some(format!("{c} | dp={dp} | hutang={sisa_hutang}")),
         (Some(c), None, false) => Some(c),
-        (None, Some(sid), true) => Some(format!("supplier_id={sid} | dp={dp} | hutang={sisa_hutang}")),
+        (None, Some(sid), true) => Some(format!(
+            "supplier_id={sid} | dp={dp} | hutang={sisa_hutang}"
+        )),
         (None, Some(sid), false) => Some(format!("supplier_id={sid} | dp={dp}")),
         (None, None, true) => Some(format!("dp={dp} | hutang={sisa_hutang}")),
         (None, None, false) => None,
@@ -264,9 +292,13 @@ pub fn list_transaksi(
          ) \
          SELECT t.id, t.tipe, t.total, t.metode_bayar, t.catatan, t.tanggal, t.created_at, \
          COALESCE(t.pajak_nominal,0), COALESCE(t.biaya_layanan,0), COALESCE(t.ongkir,0), \
-         t.supplier_id, s.nama, r.no_nota \
+         t.supplier_id, s.nama, t.sales_id, sl.nama, r.no_nota, \
+         hp.status, hp.jumlah - hp.jumlah_bayar AS sisa \
          FROM transaksi t \
          LEFT JOIN supplier s ON s.id = t.supplier_id \
+         LEFT JOIN sales sl ON sl.id = t.sales_id \
+         LEFT JOIN hutang_piutang hp ON hp.kontak_id = t.supplier_id AND hp.tipe = 'hutang' \
+           AND hp.keterangan LIKE '%#' || t.id || '%' \
          JOIN RankedTransaksi r ON r.id = t.id \
          WHERE 1=1",
     );
@@ -315,7 +347,11 @@ pub fn list_transaksi(
                 ongkir: row.get(9).unwrap_or(0),
                 supplier_id: row.get(10)?,
                 supplier_nama: row.get(11)?,
-                no_nota: row.get(12)?,
+                sales_id: row.get(12)?,
+                sales_nama: row.get(13)?,
+                no_nota: row.get(14)?,
+                status: row.get(15)?,
+                sisa: row.get(16)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -325,6 +361,135 @@ pub fn list_transaksi(
         result.push(row.map_err(|e| e.to_string())?);
     }
     Ok(result)
+}
+
+/// Satu baris daftar penjualan sales untuk audit kasir dan perhitungan komisi.
+///
+/// Parameters: difilter berdasarkan tanggal, sales, dan shift opsional.
+/// Returns: rincian produk per transaksi, termasuk nota dan metode pembayaran.
+/// Side effects: tidak mengubah database.
+#[derive(Debug, Serialize)]
+pub struct PenjualanSalesRow {
+    pub no_nota: Option<i64>,
+    pub pelanggan: Option<String>,
+    pub produk_nama: String,
+    pub qty: i64,
+    pub harga_satuan: i64,
+    pub total_harga: i64,
+    pub sales_nama: Option<String>,
+    pub metode_bayar: String,
+}
+
+/// Ringkasan nilai penjualan berdasarkan metode pembayaran.
+///
+/// Returns: total tunai, total non-tunai, dan omzet pada filter yang dipilih.
+/// Side effects: tidak mengubah database.
+#[derive(Debug, Serialize)]
+pub struct SummaryPenjualanSales {
+    pub total_tunai: i64,
+    pub total_non_tunai: i64,
+    pub total_omzet: i64,
+}
+
+/// Mengambil rincian penjualan per item untuk tab Daftar Penjualan pada Data Sales.
+///
+/// Parameters: `tanggal` format YYYY-MM-DD; `sales_id` dan `shift_id` nullable.
+/// Returns: baris penjualan yang cocok dengan filter.
+/// Side effects: hanya membaca database.
+#[tauri::command]
+pub fn list_penjualan_sales(
+    state: State<DbState>,
+    tanggal: String,
+    sales_id: Option<i64>,
+    shift_id: Option<i64>,
+) -> Result<Vec<PenjualanSalesRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let end = format!("{tanggal} 23:59:59");
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.no_nota,
+                    CASE WHEN instr(t.catatan, 'customer_id=') > 0
+                         THEN c.nama END,
+                    p.nama, ti.qty, ti.harga_satuan, ti.subtotal,
+                    sl.nama, t.metode_bayar
+             FROM transaksi_item ti
+             JOIN transaksi t ON t.id = ti.transaksi_id
+             JOIN produk p ON p.id = ti.produk_id
+             LEFT JOIN sales sl ON sl.id = t.sales_id
+             LEFT JOIN customer c ON c.id = CAST(substr(t.catatan, instr(t.catatan, 'customer_id=') + 12) AS INTEGER)
+             JOIN (
+                 SELECT id, ROW_NUMBER() OVER (PARTITION BY strftime('%Y-%m', tanggal) ORDER BY id ASC) AS no_nota
+                 FROM transaksi
+             ) r ON r.id = t.id
+             WHERE t.tipe = 'penjualan'
+               AND t.tanggal BETWEEN ?1 AND ?2
+               AND (?3 IS NULL OR t.sales_id = ?3)
+               AND (?4 IS NULL OR EXISTS (
+                   SELECT 1 FROM shift sh
+                   WHERE sh.id = ?4
+                     AND t.tanggal >= sh.opened_at
+                     AND t.tanggal <= COALESCE(sh.closed_at, datetime('now'))
+               ))
+             ORDER BY t.tanggal DESC, t.id DESC, ti.id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![tanggal, end, sales_id, shift_id], |row| {
+            Ok(PenjualanSalesRow {
+                no_nota: row.get(0)?,
+                pelanggan: row.get(1)?,
+                produk_nama: row.get(2)?,
+                qty: row.get(3)?,
+                harga_satuan: row.get(4)?,
+                total_harga: row.get(5)?,
+                sales_nama: row.get(6)?,
+                metode_bayar: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Menghitung total tunai, non-tunai, dan omzet tanpa menggandakan transaksi per item.
+///
+/// Parameters: filter sama dengan `list_penjualan_sales`.
+/// Returns: satu ringkasan agregat.
+/// Side effects: hanya membaca database.
+#[tauri::command]
+pub fn summary_penjualan_sales(
+    state: State<DbState>,
+    tanggal: String,
+    sales_id: Option<i64>,
+    shift_id: Option<i64>,
+) -> Result<SummaryPenjualanSales, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let end = format!("{tanggal} 23:59:59");
+    conn.query_row(
+        "SELECT
+            COALESCE(SUM(CASE WHEN t.metode_bayar = 'tunai' THEN t.total ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN t.metode_bayar <> 'tunai' THEN t.total ELSE 0 END), 0),
+            COALESCE(SUM(t.total), 0)
+         FROM transaksi t
+         WHERE t.tipe = 'penjualan'
+           AND t.tanggal BETWEEN ?1 AND ?2
+           AND (?3 IS NULL OR t.sales_id = ?3)
+           AND (?4 IS NULL OR EXISTS (
+               SELECT 1 FROM shift sh
+               WHERE sh.id = ?4
+                 AND t.tanggal >= sh.opened_at
+                 AND t.tanggal <= COALESCE(sh.closed_at, datetime('now'))
+           ))",
+        rusqlite::params![tanggal, end, sales_id, shift_id],
+        |row| {
+            Ok(SummaryPenjualanSales {
+                total_tunai: row.get(0)?,
+                total_non_tunai: row.get(1)?,
+                total_omzet: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Ambil baris laporan PDF: produk diagregasi per nama produk + metode pembayaran.
@@ -385,11 +550,12 @@ pub fn get_transaksi_detail(state: State<DbState>, id: i64) -> Result<TransaksiD
              ) \
              SELECT t.id, t.tipe, t.total, t.metode_bayar, t.catatan, t.tanggal, t.created_at, \
              COALESCE(t.pajak_nominal,0), COALESCE(t.biaya_layanan,0), COALESCE(t.ongkir,0), \
-             t.supplier_id, s.nama, r.no_nota \
-             FROM transaksi t \
-             LEFT JOIN supplier s ON s.id = t.supplier_id \
-             JOIN RankedTransaksi r ON r.id = t.id \
-             WHERE t.id = ?1",
+              t.supplier_id, s.nama, t.sales_id, sl.nama, r.no_nota \
+              FROM transaksi t \
+              LEFT JOIN supplier s ON s.id = t.supplier_id \
+              LEFT JOIN sales sl ON sl.id = t.sales_id \
+              JOIN RankedTransaksi r ON r.id = t.id \
+              WHERE t.id = ?1",
             params![id],
             |row| {
                 Ok(Transaksi {
@@ -403,10 +569,14 @@ pub fn get_transaksi_detail(state: State<DbState>, id: i64) -> Result<TransaksiD
                     pajak_nominal: row.get(7).unwrap_or(0),
                     biaya_layanan: row.get(8).unwrap_or(0),
                     ongkir: row.get(9).unwrap_or(0),
-                    supplier_id: row.get(10)?,
-                    supplier_nama: row.get(11)?,
-                    no_nota: row.get(12)?,
-                })
+                     supplier_id: row.get(10)?,
+                     supplier_nama: row.get(11)?,
+                     sales_id: row.get(12)?,
+                     sales_nama: row.get(13)?,
+                     no_nota: row.get(14)?,
+                     status: None,
+                     sisa: None,
+                 })
             },
         )
         .map_err(|_| "Transaksi tidak ditemukan".to_string())?;
@@ -681,7 +851,10 @@ pub fn retur_penjualan(
     let retur_id = tx.last_insert_rowid();
     insert_retur_items(&tx, retur_id, &items)?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(TransaksiResult { transaksi_id, total: refund_total })
+    Ok(TransaksiResult {
+        transaksi_id,
+        total: refund_total,
+    })
 }
 
 #[tauri::command]
@@ -690,31 +863,61 @@ pub fn list_retur(state: State<DbState>) -> Result<Vec<ReturListItem>, String> {
     let mut stmt = conn
         .prepare("SELECT id, transaksi_id, total_refund, alasan, created_at FROM retur ORDER BY created_at DESC, id DESC")
         .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| Ok(ReturListItem {
-        id: row.get(0)?, transaksi_id: row.get(1)?, total_refund: row.get(2)?, alasan: row.get(3)?, created_at: row.get(4)?,
-    })).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ReturListItem {
+                id: row.get(0)?,
+                transaksi_id: row.get(1)?,
+                total_refund: row.get(2)?,
+                alasan: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
     let mut result = Vec::new();
-    for row in rows { result.push(row.map_err(|e| e.to_string())?); }
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
     Ok(result)
 }
 
 #[tauri::command]
 pub fn get_retur_detail(state: State<DbState>, id: i64) -> Result<ReturDetail, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let header = conn.query_row(
-        "SELECT id, transaksi_id, total_refund, alasan, created_at FROM retur WHERE id=?1",
-        params![id],
-        |row| Ok(ReturListItem { id: row.get(0)?, transaksi_id: row.get(1)?, total_refund: row.get(2)?, alasan: row.get(3)?, created_at: row.get(4)? }),
-    ).map_err(|_| "Retur tidak ditemukan".to_string())?;
+    let header = conn
+        .query_row(
+            "SELECT id, transaksi_id, total_refund, alasan, created_at FROM retur WHERE id=?1",
+            params![id],
+            |row| {
+                Ok(ReturListItem {
+                    id: row.get(0)?,
+                    transaksi_id: row.get(1)?,
+                    total_refund: row.get(2)?,
+                    alasan: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            },
+        )
+        .map_err(|_| "Retur tidak ditemukan".to_string())?;
     let mut stmt = conn.prepare(
         "SELECT ri.produk_id, p.nama, ri.qty, ri.harga_satuan, ri.subtotal
          FROM retur_item ri JOIN produk p ON p.id = ri.produk_id WHERE ri.retur_id=?1 ORDER BY p.nama ASC",
     ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![id], |row| Ok(ReturItemDetail {
-        produk_id: row.get(0)?, produk_nama: row.get(1)?, qty: row.get(2)?, harga_satuan: row.get(3)?, subtotal: row.get(4)?,
-    })).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![id], |row| {
+            Ok(ReturItemDetail {
+                produk_id: row.get(0)?,
+                produk_nama: row.get(1)?,
+                qty: row.get(2)?,
+                harga_satuan: row.get(3)?,
+                subtotal: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
     let mut items = Vec::new();
-    for row in rows { items.push(row.map_err(|e| e.to_string())?); }
+    for row in rows {
+        items.push(row.map_err(|e| e.to_string())?);
+    }
     Ok(ReturDetail { header, items })
 }
 
@@ -730,11 +933,23 @@ pub fn update_retur_penjualan(
     }
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let (transaksi_id, kas_id, old_total): (i64, Option<i64>, i64) = tx.query_row(
-        "SELECT transaksi_id, kas_id, total_refund FROM retur WHERE id=?1",
-        params![retur_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).map_err(|_| "Retur tidak ditemukan".to_string())?;
+    let (transaksi_id, kas_id, old_total, created_at): (i64, Option<i64>, i64, String) = tx
+        .query_row(
+            "SELECT transaksi_id, kas_id, total_refund, created_at FROM retur WHERE id=?1",
+            params![retur_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| "Retur tidak ditemukan".to_string())?;
+    let age_days: f64 = tx
+        .query_row(
+            "SELECT julianday('now') - julianday(?1)",
+            params![created_at],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if age_days >= 1.0 {
+        return Err("Retur tidak dapat diedit setelah melewati 1 hari".into());
+    }
 
     reverse_retur(&tx, retur_id, transaksi_id, old_total)?;
     let refund_total = apply_retur_forward(&tx, transaksi_id, &items)?;
@@ -744,52 +959,109 @@ pub fn update_retur_penjualan(
         "UPDATE transaksi SET total = CASE WHEN total - ?1 < 0 THEN 0 ELSE total - ?1 END,
          catatan = COALESCE(catatan, '') || ' | edit_retur=' || ?2 WHERE id=?3",
         params![refund_total, retur_id, transaksi_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     if let Some(kid) = kas_id {
-        tx.execute("UPDATE kas SET jumlah=?1, keterangan=?2 WHERE id=?3", params![refund_total, refund_note, kid]).map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE kas SET jumlah=?1, keterangan=?2 WHERE id=?3",
+            params![refund_total, refund_note, kid],
+        )
+        .map_err(|e| e.to_string())?;
     }
     tx.execute(
         "UPDATE retur SET total_refund=?1, alasan=?2, updated_at=datetime('now') WHERE id=?3",
         params![refund_total, refund_note, retur_id],
-    ).map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM retur_item WHERE retur_id=?1", params![retur_id]).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM retur_item WHERE retur_id=?1",
+        params![retur_id],
+    )
+    .map_err(|e| e.to_string())?;
     insert_retur_items(&tx, retur_id, &items)?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(TransaksiResult { transaksi_id, total: refund_total })
+    Ok(TransaksiResult {
+        transaksi_id,
+        total: refund_total,
+    })
 }
 
-fn apply_retur_forward(tx: &rusqlite::Transaction<'_>, transaksi_id: i64, items: &[ItemInput]) -> Result<i64, String> {
-    let tipe: String = tx.query_row("SELECT tipe FROM transaksi WHERE id=?1", params![transaksi_id], |row| row.get(0))
+fn apply_retur_forward(
+    tx: &rusqlite::Transaction<'_>,
+    transaksi_id: i64,
+    items: &[ItemInput],
+) -> Result<i64, String> {
+    let tipe: String = tx
+        .query_row(
+            "SELECT tipe FROM transaksi WHERE id=?1",
+            params![transaksi_id],
+            |row| row.get(0),
+        )
         .map_err(|_| "Transaksi asal tidak ditemukan".to_string())?;
-    if tipe != "penjualan" { return Err("Retur hanya untuk transaksi penjualan".into()); }
+    if tipe != "penjualan" {
+        return Err("Retur hanya untuk transaksi penjualan".into());
+    }
     let mut refund_total = 0;
     for item in items {
-        if item.qty <= 0 { return Err("Qty retur harus minimal 1".into()); }
+        if item.qty <= 0 {
+            return Err("Qty retur harus minimal 1".into());
+        }
         let (sold_qty, harga): (i64, i64) = tx.query_row(
             "SELECT qty, harga_satuan FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2",
             params![transaksi_id, item.produk_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).map_err(|_| format!("Produk ID {} tidak ada di transaksi asal", item.produk_id))?;
-        if item.qty > sold_qty { return Err(format!("Qty retur melebihi qty jual ({sold_qty})")); }
+        if item.qty > sold_qty {
+            return Err(format!("Qty retur melebihi qty jual ({sold_qty})"));
+        }
         refund_total += item.qty * harga;
-        tx.execute("UPDATE produk SET stok = stok + ?1, updated_at=datetime('now') WHERE id=?2", params![item.qty, item.produk_id]).map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE produk SET stok = stok + ?1, updated_at=datetime('now') WHERE id=?2",
+            params![item.qty, item.produk_id],
+        )
+        .map_err(|e| e.to_string())?;
         let sisa = sold_qty - item.qty;
         if sisa > 0 {
             tx.execute("UPDATE transaksi_item SET qty=?1, subtotal=?1 * harga_satuan WHERE transaksi_id=?2 AND produk_id=?3", params![sisa, transaksi_id, item.produk_id]).map_err(|e| e.to_string())?;
         } else {
-            tx.execute("DELETE FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2", params![transaksi_id, item.produk_id]).map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2",
+                params![transaksi_id, item.produk_id],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
     Ok(refund_total)
 }
 
-fn reverse_retur(tx: &rusqlite::Transaction<'_>, retur_id: i64, transaksi_id: i64, old_total: i64) -> Result<(), String> {
-    let mut stmt = tx.prepare("SELECT produk_id, qty, harga_satuan FROM retur_item WHERE retur_id=?1").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![retur_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))).map_err(|e| e.to_string())?;
+fn reverse_retur(
+    tx: &rusqlite::Transaction<'_>,
+    retur_id: i64,
+    transaksi_id: i64,
+    old_total: i64,
+) -> Result<(), String> {
+    let mut stmt = tx
+        .prepare("SELECT produk_id, qty, harga_satuan FROM retur_item WHERE retur_id=?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![retur_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
     for row in rows {
         let (produk_id, qty, harga) = row.map_err(|e| e.to_string())?;
         tx.execute("UPDATE produk SET stok = CASE WHEN stok - ?1 < 0 THEN 0 ELSE stok - ?1 END, updated_at=datetime('now') WHERE id=?2", params![qty, produk_id]).map_err(|e| e.to_string())?;
-        let exists: i64 = tx.query_row("SELECT COUNT(*) FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2", params![transaksi_id, produk_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM transaksi_item WHERE transaksi_id=?1 AND produk_id=?2",
+                params![transaksi_id, produk_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         if exists > 0 {
             tx.execute("UPDATE transaksi_item SET qty=qty+?1, subtotal=(qty+?1)*harga_satuan WHERE transaksi_id=?2 AND produk_id=?3", params![qty, transaksi_id, produk_id]).map_err(|e| e.to_string())?;
         } else {
@@ -797,13 +1069,27 @@ fn reverse_retur(tx: &rusqlite::Transaction<'_>, retur_id: i64, transaksi_id: i6
         }
     }
     drop(stmt);
-    tx.execute("UPDATE transaksi SET total=total+?1 WHERE id=?2", params![old_total, transaksi_id]).map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE transaksi SET total=total+?1 WHERE id=?2",
+        params![old_total, transaksi_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-fn insert_retur_items(tx: &rusqlite::Transaction<'_>, retur_id: i64, items: &[ItemInput]) -> Result<(), String> {
+fn insert_retur_items(
+    tx: &rusqlite::Transaction<'_>,
+    retur_id: i64,
+    items: &[ItemInput],
+) -> Result<(), String> {
     for item in items {
-        let harga: i64 = tx.query_row("SELECT harga_jual FROM produk WHERE id=?1", params![item.produk_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+        let harga: i64 = tx
+            .query_row(
+                "SELECT harga_jual FROM produk WHERE id=?1",
+                params![item.produk_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         tx.execute(
             "INSERT INTO retur_item (retur_id, produk_id, qty, harga_satuan, subtotal) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![retur_id, item.produk_id, item.qty, harga, item.qty * harga],

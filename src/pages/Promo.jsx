@@ -13,12 +13,13 @@
 import { useMemo, useState, useEffect } from "react";
 import { useToast } from "../hooks/useToast";
 import { invoke } from "../utils/ipc";
+import SearchSelect from "../components/SearchSelect";
+import RupiahInput from "../components/RupiahInput";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
 
 const STORAGE_KEY_MIN = "mikrokas_promo_minimum_belanja";
 const STORAGE_KEY_BXGY = "mikrokas_promo_bxgy";
 const STORAGE_KEY_TM = "mikrokas_promo_tebus_murah";
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
-
 // ---- Promo Minimum Belanja ----
 const defaultMinRule = {
   aktif: false,
@@ -161,23 +162,16 @@ export default function Promo() {
   };
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">MASTER DATA</p>
-          <p className="text-headline-lg">Periode Promosi</p>
-          <p className="text-body-md sales-page__subtitle">
-            Atur promo yang otomatis berlaku di kasir saat pelanggan memenuhi syarat.
-          </p>
-        </div>
-      </header>
-
-      <section className="sales-stats">
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: minRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>local_offer</span><div><span>Min. Belanja</span><strong>{minRule.aktif ? "Aktif" : "Off"}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: bxgyRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>card_giftcard</span><div><span>Beli X Gratis Y</span><strong>{bxgyRule.aktif ? "Aktif" : "Off"}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: tmRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>redeem</span><div><span>Tebus Murah</span><strong>{tmRule.aktif ? "Aktif" : "Off"}</strong></div></div>
-      </section>
-
+    <PageShell
+      eyebrow="MASTER DATA"
+      title="Periode Promosi"
+      description="Atur promo yang otomatis berlaku di kasir saat pelanggan memenuhi syarat."
+      stats={[
+        { label: "Min. Belanja", value: minRule.aktif ? "Aktif" : "Off", icon: "local_offer", tone: minRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" },
+        { label: "Beli X Gratis Y", value: bxgyRule.aktif ? "Aktif" : "Off", icon: "card_giftcard", tone: bxgyRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" },
+        { label: "Tebus Murah", value: tmRule.aktif ? "Aktif" : "Off", icon: "redeem", tone: tmRule.aktif ? "var(--color-income-green)" : "var(--color-text-secondary)" },
+      ]}
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
       {/* ========== PROMO MINIMUM BELANJA ========== */}
@@ -187,7 +181,7 @@ export default function Promo() {
           <p className="text-headline-sm" style={{ fontSize: "16px", fontWeight: 600 }}>Promo Minimum Belanja</p>
         </div>
 
-        <div className="card" style={{ padding: "0.75rem", marginBottom: "1rem", background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(6,182,212,0.12))" }}>
+        <div className="card" style={{ padding: "0.75rem", marginBottom: "1rem", background: "linear-gradient(135deg, rgba(30,58,138,0.10), rgba(15,118,110,0.10))" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <p className="text-headline-sm">Aktifkan Promo</p>
@@ -206,7 +200,7 @@ export default function Promo() {
 
         <div style={{ marginBottom: "0.75rem" }}>
           <label className="input-label">Minimal Belanja</label>
-          <input className="input-field" inputMode="numeric" value={minRule.minBelanja} onChange={(e) => setMinRule((p) => ({ ...p, minBelanja: e.target.value.replace(/\D/g, "") }))} placeholder="100000" />
+          <RupiahInput value={minRule.minBelanja} onChange={(val) => setMinRule((p) => ({ ...p, minBelanja: val }))} placeholder="100000" />
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
@@ -258,30 +252,27 @@ export default function Promo() {
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
-          <label className="input-label">Minimal Belanja (Rp)</label>
-          <input className="input-field" inputMode="numeric" value={bxgyRule.minBelanja} onChange={(e) => setBxgyRule((p) => ({ ...p, minBelanja: e.target.value.replace(/\D/g, "") }))} placeholder="200000" />
+          <label className="input-label">Minimal Belanja</label>
+          <RupiahInput value={bxgyRule.minBelanja} onChange={(v) => setBxgyRule((p) => ({ ...p, minBelanja: v }))} placeholder="200000" />
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
           <label className="input-label">Produk Gratis</label>
-          <select
+          <SearchSelect
             className="input-field"
             value={bxgyRule.produkId || ""}
-            onChange={(e) => {
-              const id = e.target.value ? Number(e.target.value) : null;
+            onChange={(value) => {
+              const id = value ? Number(value) : null;
               const nama = produkList.find((p) => p.id === id)?.nama || "";
               setBxgyRule((p) => ({ ...p, produkId: id, produkNama: nama }));
             }}
-          >
-            <option value="">Pilih produk...</option>
-            {produkList.map((p) => (
-              <option key={p.id} value={p.id}>{p.nama} — {rupiah(p.harga_jual)}</option>
-            ))}
-          </select>
+            placeholder="Pilih produk..."
+            options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama} — ${rupiah(p.harga_jual)}` }))}
+          />
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
-          <label className="input-label">Qty Gratis</label>
+          <label className="input-label">Jumlah Gratis</label>
           <input className="input-field" inputMode="numeric" value={bxgyRule.qtyGratis} onChange={(e) => setBxgyRule((p) => ({ ...p, qtyGratis: e.target.value.replace(/\D/g, "") || "1" }))} placeholder="1" />
         </div>
 
@@ -301,7 +292,7 @@ export default function Promo() {
       {/* ========== TEBUS MURAH ========== */}
       <div className="card" style={{ padding: "1.25rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "1rem" }}>
-          <span className="material-symbols-outlined" style={{ color: "#06B6D4", fontSize: "20px" }}>sell</span>
+          <span className="material-symbols-outlined" style={{ color: "var(--color-secondary-cyan)", fontSize: "20px" }}>sell</span>
           <p className="text-headline-sm" style={{ fontSize: "16px", fontWeight: 600 }}>Tebus Murah</p>
         </div>
         <p className="text-body-sm" style={{ color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
@@ -326,31 +317,28 @@ export default function Promo() {
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
-          <label className="input-label">Minimal Belanja (Rp)</label>
-          <input className="input-field" inputMode="numeric" value={tmRule.minBelanja} onChange={(e) => setTmRule((p) => ({ ...p, minBelanja: e.target.value.replace(/\D/g, "") }))} placeholder="300000" />
+          <label className="input-label">Minimal Belanja</label>
+          <RupiahInput value={tmRule.minBelanja} onChange={(v) => setTmRule((p) => ({ ...p, minBelanja: v }))} placeholder="300000" />
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
           <label className="input-label">Produk Tebus Murah</label>
-          <select
+          <SearchSelect
             className="input-field"
             value={tmRule.produkId || ""}
-            onChange={(e) => {
-              const id = e.target.value ? Number(e.target.value) : null;
+            onChange={(value) => {
+              const id = value ? Number(value) : null;
               const nama = produkList.find((p) => p.id === id)?.nama || "";
               setTmRule((p) => ({ ...p, produkId: id, produkNama: nama }));
             }}
-          >
-            <option value="">Pilih produk...</option>
-            {produkList.map((p) => (
-              <option key={p.id} value={p.id}>{p.nama} — {rupiah(p.harga_jual)}</option>
-            ))}
-          </select>
+            placeholder="Pilih produk..."
+            options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama} — ${rupiah(p.harga_jual)}` }))}
+          />
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
-          <label className="input-label">Harga Tebus (Rp)</label>
-          <input className="input-field" inputMode="numeric" value={tmRule.hargaTebus} onChange={(e) => setTmRule((p) => ({ ...p, hargaTebus: e.target.value.replace(/\D/g, "") }))} placeholder="5000" />
+          <label className="input-label">Harga Tebus</label>
+          <RupiahInput value={tmRule.hargaTebus} onChange={(v) => setTmRule((p) => ({ ...p, hargaTebus: v }))} placeholder="5000" />
           {selectedTmProduk && (
             <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>
               Normal: {rupiah(Number(selectedTmProduk.harga_jual || 0))} → Tebus: {rupiah(tmHarga)} (hemat {rupiah(Number(selectedTmProduk.harga_jual || 0) - tmHarga)})
@@ -371,6 +359,6 @@ export default function Promo() {
         </div>
       </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

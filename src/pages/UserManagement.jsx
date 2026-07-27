@@ -1,254 +1,42 @@
-import { useEffect, useState } from "react";
+// ============================================================
+// UserManagement.jsx — CRUD user & role (PageKit).
+//
+// Commands: list_users, create_user, deactivate_user
+// ============================================================
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import SearchSelect from "../components/SearchSelect";
+import {
+  PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter,
+} from "../components/PageKit";
+
+/** Map role → tone StatusBadge. */
+function roleTone(role) {
+  if (role === "admin") return "primary";
+  if (role === "supervisor") return "warning";
+  if (role === "kasir") return "success";
+  return "neutral";
+}
 
 /**
- * Role badge: maps role string to label + color.
- * @param {string} role - "admin" | "supervisor" | "kasir"
- */
-const RoleBadge = ({ role }) => {
-  const map = {
-    admin: { label: "Admin", bg: "#7C3AED", color: "#fff" },
-    supervisor: { label: "Supervisor", bg: "#06B6D4", color: "#fff" },
-    kasir: { label: "Kasir", bg: "#10B981", color: "#fff" },
-  };
-  const s = map[role] || { label: role, bg: "#E2E8F0", color: "#0F172A" };
-  return (
-    <span style={{
-      fontSize: "10px", fontWeight: 600, padding: "2px 8px",
-      borderRadius: "999px", background: s.bg, color: s.color,
-      textTransform: "uppercase", letterSpacing: "0.5px",
-    }}>
-      {s.label}
-    </span>
-  );
-};
-
-/**
- * Modal form untuk buat user baru.
- * Validasi: username min 3 karakter, password min 6 karakter.
- * @param {{ onClose: Function, onSaved: Function }} props
- */
-const TambahUserModal = ({ onClose, onSaved }) => {
-  const { addToast } = useToast();
-  const [form, setForm] = useState({ username: "", password: "", namaLengkap: "", role: "kasir" });
-  const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState({});
-
-  const validate = () => {
-    const e = {};
-    if (form.username.trim().length < 3) e.username = "Username min 3 karakter";
-    if (form.password.length < 6) e.password = "Password min 6 karakter";
-    if (!form.role) e.role = "Role wajib dipilih";
-    return e;
-  };
-
-  const save = async (evt) => {
-    evt.preventDefault();
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    try {
-      await invoke("create_user", {
-        req: {
-          username: form.username.trim(),
-          password: form.password,
-          nama_lengkap: form.namaLengkap.trim() || null,
-          role: form.role,
-        },
-      });
-      addToast("User berhasil ditambahkan", "success");
-      onSaved();
-    } catch (err) {
-      addToast(String(err), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const Field = ({ name, label, type = "text", placeholder, hint }) => (
-    <div style={{ marginBottom: "14px" }}>
-      <label className="input-label">{label}</label>
-      <input
-        className="input-field"
-        type={type}
-        value={form[name]}
-        placeholder={placeholder}
-        onChange={(e) => {
-          setForm((p) => ({ ...p, [name]: e.target.value }));
-          setErrors((p) => ({ ...p, [name]: null }));
-        }}
-      />
-      {hint && !errors[name] && (
-        <p style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "4px" }}>{hint}</p>
-      )}
-      {errors[name] && (
-        <p style={{ fontSize: "11px", color: "var(--color-error)", marginTop: "4px" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "12px", verticalAlign: "middle" }}>error</span>
-          {" "}{errors[name]}
-        </p>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{
-              width: "36px", height: "36px", borderRadius: "10px",
-              background: "var(--color-primary-fixed)", display: "flex",
-              alignItems: "center", justifyContent: "center",
-            }}>
-              <span className="material-symbols-outlined" style={{ fontSize: "20px", color: "var(--color-primary)" }}>person_add</span>
-            </div>
-            <div>
-              <h3 className="text-headline-sm">Tambah User Baru</h3>
-              <p style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>Isi data pengguna di bawah</p>
-            </div>
-          </div>
-          <button className="btn-icon" onClick={onClose} aria-label="Tutup">
-            <span className="material-symbols-outlined">close</span>
-          </button>
-        </div>
-
-        <form onSubmit={save}>
-          <Field name="username" label="Username *" placeholder="min. 3 karakter" hint="Username min 3 karakter, tidak bisa diubah" />
-          <Field name="password" label="Password *" type="password" placeholder="min. 6 karakter" hint="Password min 6 karakter" />
-          <Field name="namaLengkap" label="Nama Lengkap" placeholder="Nama lengkap (opsional)" />
-
-          <div style={{ marginBottom: "14px" }}>
-            <label className="input-label">Role *</label>
-            <select
-              className="input-field"
-              value={form.role}
-              onChange={(e) => { setForm((p) => ({ ...p, role: e.target.value })); setErrors((p) => ({ ...p, role: null })); }}
-            >
-              <option value="kasir">Kasir — akses POS saja</option>
-              <option value="supervisor">Supervisor — semua kecuali manajemen user</option>
-              <option value="admin">Admin — akses penuh</option>
-            </select>
-            {errors.role && (
-              <p style={{ fontSize: "11px", color: "var(--color-error)", marginTop: "4px" }}>{errors.role}</p>
-            )}
-          </div>
-
-          {/* Role info card */}
-          <div style={{
-            background: "var(--color-surface-container-low)", borderRadius: "10px",
-            padding: "10px 12px", marginBottom: "16px",
-            display: "flex", gap: "8px", alignItems: "flex-start",
-          }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-text-secondary)", marginTop: "1px", flexShrink: 0 }}>info</span>
-            <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: "1.5" }}>
-              <b>Kasir</b>: POS kasir saja.{" "}<b>Supervisor</b>: semua fitur kecuali kelola user.{" "}<b>Admin</b>: akses penuh termasuk user management.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Batal</button>
-            <button type="submit" className="btn-primary" style={{ flex: 2 }} disabled={saving}>
-              {saving ? <span className="spinner" style={{ width: "16px", height: "16px" }} /> : (
-                <><span className="material-symbols-outlined" style={{ fontSize: "16px" }}>person_add</span> Tambah User</>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-/**
- * Kartu user: menampilkan info + tombol nonaktifkan.
- * @param {{ user: object, onDeactivated: Function }} props
- */
-const UserCard = ({ user, onDeactivated }) => {
-  const { addToast } = useToast();
-  const [loading, setLoading] = useState(false);
-
-  const deactivate = async () => {
-    if (!confirm(`Nonaktifkan user "${user.username}"? User tidak bisa login setelah ini.`)) return;
-    setLoading(true);
-    try {
-      await invoke("deactivate_user", { id: Number(user.id) });
-      addToast(`User ${user.username} dinonaktifkan`, "success");
-      onDeactivated();
-    } catch (err) {
-      addToast(String(err), "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="card" style={{
-      display: "flex", alignItems: "center", gap: "12px",
-      opacity: user.is_active ? 1 : 0.5,
-      border: user.is_active ? "1px solid var(--color-surface-border)" : "1px dashed var(--color-surface-border)",
-    }}>
-      {/* Avatar */}
-      <div style={{
-        width: "42px", height: "42px", borderRadius: "50%", flexShrink: 0,
-        background: user.is_active ? "var(--color-primary-fixed)" : "var(--color-surface-container-high)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <span className="material-symbols-outlined" style={{
-          fontSize: "22px", color: user.is_active ? "var(--color-primary)" : "var(--color-text-secondary)",
-        }}>person</span>
-      </div>
-
-      {/* Info */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 600, fontSize: "14px" }}>{user.username}</span>
-          <RoleBadge role={user.role} />
-          {!user.is_active && (
-            <span style={{ fontSize: "10px", color: "var(--color-error)", background: "var(--color-error-container)", padding: "2px 6px", borderRadius: "999px" }}>
-              Nonaktif
-            </span>
-          )}
-        </div>
-        {user.nama_lengkap && (
-          <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {user.nama_lengkap}
-          </p>
-        )}
-      </div>
-
-      {/* Action */}
-      {user.is_active && (
-        <button
-          className="btn-icon"
-          style={{ padding: "6px", flexShrink: 0 }}
-          onClick={deactivate}
-          disabled={loading}
-          title="Nonaktifkan user"
-          aria-label={`Nonaktifkan ${user.username}`}
-        >
-          {loading
-            ? <span className="spinner" style={{ width: "16px", height: "16px" }} />
-            : <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-error)" }}>person_off</span>
-          }
-        </button>
-      )}
-    </div>
-  );
-};
-
-/**
- * Halaman manajemen user.
- * Load: list_users. Create: create_user. Deactivate: deactivate_user.
+ * Halaman manajemen user: list, tambah, nonaktifkan.
  */
 export default function UserManagement() {
   const { addToast } = useToast();
   const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ username: "", password: "", namaLengkap: "", role: "kasir" });
+  const [errors, setErrors] = useState({});
+  const [deactivatingId, setDeactivatingId] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editUserId, setEditUserId] = useState(null);
+  const [securityQuestions, setSecurityQuestions] = useState([]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await invoke("list_users");
@@ -258,73 +46,378 @@ export default function UserManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    invoke("get_current_user").then(setCurrentUser).catch(() => {});
+  }, [load]);
 
-  // Summary stats
+  const { query, setQuery, filtered } = useSearchFilter(
+    users,
+    (u) => `${u.username || ""} ${u.nama_lengkap || ""} ${u.role || ""}`
+  );
+
   const aktif = users.filter((u) => u.is_active).length;
   const nonaktif = users.length - aktif;
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>;
+  const openNew = () => {
+    setForm({ username: "", password: "", namaLengkap: "", role: "kasir" });
+    setErrors({});
+    setEditMode(false);
+    setSecurityQuestions([]);
+    setShowModal(true);
+  };
+
+  const openEdit = (user) => {
+    setForm({
+      username: user.username,
+      password: "",
+      namaLengkap: user.nama_lengkap || "",
+      role: user.role,
+    });
+    setErrors({});
+    setEditMode(true);
+    setEditUserId(user.id);
+    // Load security questions for this user
+    invoke("get_security_questions_admin", { user_id: user.id })
+      .then((qs) => {
+        setSecurityQuestions((qs || []).map((q) => ({
+          pertanyaan: q.pertanyaan,
+          jawaban: q.jawaban,
+        })));
+      })
+      .catch(() => setSecurityQuestions([]));
+    setShowModal(true);
+  };
+
+  const validate = () => {
+    const e = {};
+    if (!editMode && form.username.trim().length < 3) e.username = "Username min 3 karakter";
+    if (!editMode && form.password.length < 6) e.password = "Password min 6 karakter";
+    if (editMode && form.password.length > 0 && form.password.length < 6) e.password = "Password min 6 karakter";
+    if (!form.role) e.role = "Role wajib dipilih";
+    // Admin users must have at least 1 security question
+    if (form.role === "admin") {
+      const filled = securityQuestions.filter((q) => q.pertanyaan.trim() && q.jawaban.trim());
+      if (filled.length === 0) {
+        e.questions = "Admin wajib memiliki minimal 1 pertanyaan keamanan";
+      }
+    }
+    return e;
+  };
+
+  /** Buat user baru atau update user via create_user/update_user. */
+  const save = async (evt) => {
+    evt.preventDefault();
+    const e = validate();
+    if (Object.keys(e).length) {
+      setErrors(e);
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editMode) {
+        await invoke("update_user", {
+          req: {
+            id: editUserId,
+            nama_lengkap: form.namaLengkap.trim() || null,
+            role: form.role,
+            password: form.password || null,
+          },
+        });
+        // Save security questions
+        const filledQuestions = securityQuestions
+          .filter((q) => q.pertanyaan.trim() && q.jawaban.trim())
+          .map((q) => ({
+            pertanyaan: q.pertanyaan.trim(),
+            jawaban: q.jawaban.trim(),
+          }));
+        await invoke("set_security_questions", {
+          user_id: editUserId,
+          questions: filledQuestions,
+        });
+        addToast("User berhasil diperbarui", "success");
+        // Notify App.jsx to refresh currentUser (clears must_change_password banner)
+        window.dispatchEvent(new CustomEvent("user-updated"));
+      } else {
+        const questions = securityQuestions
+          .filter((q) => q.pertanyaan.trim() && q.jawaban.trim())
+          .map((q) => ({
+            pertanyaan: q.pertanyaan.trim(),
+            jawaban: q.jawaban.trim(),
+          }));
+        await invoke("create_user", {
+          req: {
+            username: form.username.trim(),
+            password: form.password,
+            nama_lengkap: form.namaLengkap.trim() || null,
+            role: form.role,
+            questions: questions.length > 0 ? questions : undefined,
+          },
+        });
+        addToast("User berhasil ditambahkan", "success");
+      }
+      setShowModal(false);
+      load();
+    } catch (err) {
+      addToast(String(err), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** Nonaktifkan user via deactivate_user. */
+  const deactivate = async (user) => {
+    if (!confirm(`Nonaktifkan user "${user.username}"? User tidak bisa login setelah ini.`)) return;
+    setDeactivatingId(user.id);
+    try {
+      await invoke("deactivate_user", { id: Number(user.id) });
+      addToast(`User ${user.username} dinonaktifkan`, "success");
+      load();
+    } catch (err) {
+      addToast(String(err), "error");
+    } finally {
+      setDeactivatingId(null);
+    }
+  };
+
+  const setField = (name, value) => {
+    setForm((p) => ({ ...p, [name]: value }));
+    setErrors((p) => ({ ...p, [name]: null }));
+    // Auto add first security question row when switching role to admin
+    if (name === "role" && value === "admin") {
+      setSecurityQuestions((prev) => prev.length === 0 ? [{ pertanyaan: "", jawaban: "" }] : prev);
+    }
+  };
+
+  const addQuestion = () => {
+    if (securityQuestions.length >= 3) return;
+    setSecurityQuestions((prev) => [...prev, { pertanyaan: "", jawaban: "" }]);
+  };
+
+  const removeQuestion = (idx) => {
+    setSecurityQuestions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const setQuestion = (idx, field, value) => {
+    setSecurityQuestions((prev) =>
+      prev.map((q, i) => (i === idx ? { ...q, [field]: value } : q))
+    );
+  };
+
+  const columns = [
+    {
+      key: "user",
+      label: "User",
+      render: (u) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, opacity: u.is_active ? 1 : 0.55 }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ color: u.is_active ? "var(--color-primary)" : "var(--color-text-secondary)" }}
+          >
+            person
+          </span>
+          <div>
+            <b>{u.username}</b>
+            {u.nama_lengkap && (
+              <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+                {u.nama_lengkap}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "role",
+      label: "Role",
+      render: (u) => <StatusBadge label={u.role} tone={roleTone(u.role)} />,
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (u) => (
+        u.is_active
+          ? <StatusBadge label="Aktif" tone="success" />
+          : <StatusBadge label="Nonaktif" tone="danger" />
+      ),
+    },
+    {
+      key: "aksi",
+      label: "",
+      align: "right",
+      render: (u) => (
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          {currentUser?.role === "admin" && (
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => openEdit(u)}
+              title="Edit user"
+              aria-label={`Edit ${u.username}`}
+            >
+              <span className="material-symbols-outlined" style={{ color: "#2563EB" }}>edit</span>
+            </button>
+          )}
+          {currentUser?.role === "admin" && u.is_active && (
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => deactivate(u)}
+              disabled={deactivatingId === u.id}
+              title="Nonaktifkan user"
+              aria-label={`Nonaktifkan ${u.username}`}
+            >
+              {deactivatingId === u.id
+                ? <span className="spinner" style={{ width: 16, height: 16 }} />
+                : <span className="material-symbols-outlined" style={{ color: "#B91C1C" }}>person_off</span>}
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{
-            width: "44px", height: "44px", borderRadius: "12px",
-            background: "var(--color-accent-gradient)", display: "flex",
-            alignItems: "center", justifyContent: "center", flexShrink: 0,
-          }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "22px", color: "#fff" }}>group</span>
-          </div>
-          <div>
-            <h1 className="text-headline-md">User Management</h1>
-            <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>Kelola pengguna dan hak akses</p>
-          </div>
-        </div>
-        <button className="btn-primary" style={{ fontSize: "13px", padding: "8px 14px", minHeight: 0 }} onClick={() => setShowModal(true)}>
-          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span> Tambah
-        </button>
-      </div>
+    <PageShell
+      eyebrow="SISTEM"
+      title="User Management"
+      description="Kelola pengguna dan hak akses. Kasir = POS saja; Supervisor = semua kecuali user; Admin = penuh."
+      actions={
+        currentUser?.role === "admin" && (
+          <button type="button" className="btn-primary" onClick={openNew}>
+            <span className="material-symbols-outlined">person_add</span> Tambah User
+          </button>
+        )
+      }
+      stats={[
+        { label: "Total", value: users.length, icon: "group" },
+        { label: "Aktif", value: aktif, icon: "check_circle", tone: "#047857" },
+        { label: "Nonaktif", value: nonaktif, icon: "person_off", tone: "#B91C1C" },
+      ]}
+    >
+      <InfoNote>
+        Username min 3 karakter, password min 6. User nonaktif tidak bisa login. Hanya admin yang mengelola user.
+      </InfoNote>
 
-      {/* Stats cards */}
-      {users.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-          <div className="card" style={{ padding: "12px 14px", textAlign: "center" }}>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-income-green)" }}>{aktif}</div>
-            <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>User Aktif</div>
-          </div>
-          <div className="card" style={{ padding: "12px 14px", textAlign: "center" }}>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-text-secondary)" }}>{nonaktif}</div>
-            <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>Nonaktif</div>
-          </div>
-        </div>
-      )}
-
-      {/* User list */}
-      {users.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "48px", color: "var(--color-text-secondary)", opacity: 0.4 }}>group</span>
-          <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginTop: "10px" }}>Belum ada user</p>
-          <button className="btn-primary" style={{ marginTop: "1rem" }} onClick={() => setShowModal(true)}>Tambah User Pertama</button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {users.map((u) => (
-            <UserCard key={u.id} user={u} onDeactivated={load} />
-          ))}
-        </div>
-      )}
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari username / nama / role..."
+        onRefresh={load}
+        loading={loading}
+        isEmpty={!loading && filtered.length === 0}
+        emptyIcon="group"
+        emptyTitle="Belum ada user"
+        emptyHint="Klik Tambah User untuk membuat akun pertama."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(u) => u.id} />
+      </DataPanel>
 
       {showModal && (
-        <TambahUserModal
+        <FormModal
+          title={editMode ? "Edit User" : "Tambah User Baru"}
+          description={editMode ? "Ubah nama lengkap, role, atau ganti password." : "Isi username, password, dan role. Username tidak bisa diubah setelah dibuat."}
           onClose={() => setShowModal(false)}
-          onSaved={() => { setShowModal(false); load(); }}
-        />
+          onSubmit={save}
+          submitLabel={editMode ? "Simpan Perubahan" : "Tambah User"}
+          submitting={saving}
+        >
+          <label className="input-label">Username *</label>
+          <input
+            className="input-field"
+            value={form.username}
+            onChange={(e) => setField("username", e.target.value)}
+            placeholder="min. 3 karakter"
+            disabled={editMode}
+            autoFocus={!editMode}
+          />
+          {errors.username && (
+            <p style={{ fontSize: 11, color: "var(--color-error)", marginBottom: 8 }}>{errors.username}</p>
+          )}
+
+          <label className="input-label">{editMode ? "Password Baru" : "Password *"}</label>
+          <input
+            className="input-field"
+            type="password"
+            value={form.password}
+            onChange={(e) => setField("password", e.target.value)}
+            placeholder={editMode ? "Kosongkan jika tidak ingin diubah" : "min. 6 karakter"}
+            autoFocus={editMode}
+          />
+          {errors.password && (
+            <p style={{ fontSize: 11, color: "var(--color-error)", marginBottom: 8 }}>{errors.password}</p>
+          )}
+
+          <label className="input-label">Nama Lengkap</label>
+          <input
+            className="input-field"
+            value={form.namaLengkap}
+            onChange={(e) => setField("namaLengkap", e.target.value)}
+            placeholder="Opsional"
+          />
+
+          <label className="input-label">Role *</label>
+          <SearchSelect
+            value={form.role}
+            onChange={(value) => setField("role", value)}
+            options={[{ value: "kasir", label: "Kasir — akses POS saja" }, { value: "supervisor", label: "Supervisor — semua kecuali manajemen user" }, { value: "admin", label: "Admin — akses penuh" }]}
+            placeholder="Pilih role"
+          />
+          {errors.role && (
+            <p style={{ fontSize: 11, color: "var(--color-error)", marginBottom: 8 }}>{errors.role}</p>
+          )}
+
+          {errors.questions && (
+            <p style={{ fontSize: 11, color: "var(--color-error)", marginBottom: 8 }}>{errors.questions}</p>
+          )}
+
+          {(editMode || form.role === "admin") && (
+            <>
+              <hr style={{ margin: "16px 0", border: "none", borderTop: "1px solid var(--color-outline-variant, #ddd)" }} />
+              <p className="input-label" style={{ marginBottom: 8, fontWeight: 600 }}>
+                Pertanyaan Keamanan{" "}
+                <span style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>
+                  ({form.role === "admin" ? "wajib" : "opsional"}, maks. 3)
+                </span>
+              </p>
+              {securityQuestions.map((q, idx) => (
+                <div key={idx} style={{ marginBottom: 12, padding: 12, border: "1px solid var(--color-outline-variant, #ddd)", borderRadius: 8, position: "relative" }}>
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    onClick={() => removeQuestion(idx)}
+                    style={{ position: "absolute", top: 4, right: 4 }}
+                    title="Hapus pertanyaan"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 16, color: "#B91C1C" }}>close</span>
+                  </button>
+                  <label className="input-label">Pertanyaan {idx + 1}</label>
+                  <input
+                    className="input-field"
+                    value={q.pertanyaan}
+                    onChange={(e) => setQuestion(idx, "pertanyaan", e.target.value)}
+                    placeholder="Contoh: Siapa nama hewan peliharaan pertama Anda?"
+                  />
+                  <label className="input-label">Jawaban</label>
+                  <input
+                    className="input-field"
+                    value={q.jawaban}
+                    onChange={(e) => setQuestion(idx, "jawaban", e.target.value)}
+                    placeholder="Jawaban (tidak case-sensitive)"
+                  />
+                </div>
+              ))}
+              {securityQuestions.length < 3 && (
+                <button type="button" className="btn-secondary" onClick={addQuestion} style={{ width: "100%" }}>
+                  + Tambah Pertanyaan
+                </button>
+              )}
+            </>
+          )}
+        </FormModal>
       )}
-    </div>
+    </PageShell>
   );
 }

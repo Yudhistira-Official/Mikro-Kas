@@ -1,20 +1,34 @@
-// QRIS.jsx — Generate QRIS dinamis dengan pemilihan profil.
-// v2: Tab "Generate QRIS" + "Riwayat QRIS", QR code centered dinamis.
+// ============================================================
+// Qris.jsx — Generate QRIS dinamis + riwayat (PageKit).
+//
+// Commands: list_qris_profile, prune_old_qris_logs, list_qris_log,
+//   generate_qris_dinamis, konfirmasi_bayar_qris, expire_qris
+// ============================================================
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
-import { useSearchParams } from "react-router-dom";
+import { formatDateTimeId } from "../utils/dateFormat";
+import {
+  PageShell, DataPanel, DataTable, InfoNote, StatusBadge,
+  useSearchFilter, rupiah,
+} from "../components/PageKit";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 const keys = [[1, 2, 3], [4, 5, 6], [7, 8, 9], ["000", 0, "⌫"]];
 
-const statusColor = {
-  pending: "#E6A817",
-  dibayar: "#1B8A3D",
-  expired: "#999",
-  gagal: "#E53935",
-};
+/**
+ * Map status QRIS → tone StatusBadge.
+ */
+function statusTone(status) {
+  if (status === "dibayar") return "success";
+  if (status === "pending") return "warning";
+  if (status === "gagal") return "danger";
+  return "neutral";
+}
 
+/**
+ * Halaman QRIS: generate kode bayar + konfirmasi/expire riwayat.
+ */
 export default function Qris() {
   const { addToast } = useToast();
   const [searchParams] = useSearchParams();
@@ -24,44 +38,54 @@ export default function Qris() {
   const [showKeypad, setShowKeypad] = useState(false);
   const [qrisImage, setQrisImage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [history, setHistory] = useState([]);
-  const [tab, setTab] = useState(() => window.innerWidth >= 768 ? "riwayat" : "generate"); // "generate" | "riwayat"
+  const [tab, setTab] = useState(() => (window.innerWidth >= 768 ? "riwayat" : "generate"));
 
   const loadProfiles = useCallback(() => {
     invoke("list_qris_profile").then((list) => {
       setProfiles(list);
-      const active = list.find((p) => p.is_active);
-      if (active && !selectedProfileId) setSelectedProfileId(active.id);
+      setSelectedProfileId((prev) => {
+        if (prev) return prev;
+        const active = list.find((p) => p.is_active);
+        return active ? active.id : (list[0]?.id ?? null);
+      });
     }).catch(console.error);
-  }, [selectedProfileId]);
+  }, []);
 
   const loadHistory = useCallback(() => {
+    setHistoryLoading(true);
     invoke("prune_old_qris_logs")
       .then(() => invoke("list_qris_log", { limit: 20 }))
       .then(setHistory)
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setHistoryLoading(false));
   }, []);
 
   useEffect(() => {
     loadProfiles();
     loadHistory();
-    // Pre-fill nominal dari URL jika redirect dari Transaksi
     const nm = searchParams.get("nominal");
-    if (nm && !nominal) setNominal(nm);
-  }, []);
+    if (nm) setNominal(nm);
+  }, [loadProfiles, loadHistory, searchParams]);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+  const { query, setQuery, filtered } = useSearchFilter(
+    history,
+    (item) => `${item.profile_nama || ""} ${item.status || ""} ${item.nominal || ""}`
+  );
 
+  const pendingCount = history.filter((h) => h.status === "pending").length;
+  const paidCount = history.filter((h) => h.status === "dibayar").length;
+
+  /** Input keypad nominal. */
   const handleKey = (key) => {
-    if (key === "⌫") {
-      setNominal((prev) => prev.slice(0, -1));
-    } else if (key === "000") {
-      setNominal((prev) => prev + "000");
-    } else {
-      setNominal((prev) => prev + String(key));
-    }
+    if (key === "⌫") setNominal((prev) => prev.slice(0, -1));
+    else if (key === "000") setNominal((prev) => prev + "000");
+    else setNominal((prev) => prev + String(key));
   };
 
+  /** Generate QR dinamis dari profil terpilih. */
   const generateQris = async () => {
     const n = parseInt(nominal, 10);
     if (!n || n <= 0) return addToast("Masukkan nominal > 0", "error");
@@ -79,17 +103,18 @@ export default function Qris() {
     }
   };
 
+  /** Tandai log QRIS sebagai dibayar. */
   const konfirmasiBayar = async (id) => {
     try {
       await invoke("konfirmasi_bayar_qris", { qrisLogId: id });
       addToast("Pembayaran QRIS dikonfirmasi", "success");
       loadHistory();
-      // Clear QR image if the confirmed transaction matches
       setQrisImage(null);
       setNominal("");
     } catch (e) { addToast(`Gagal: ${e}`, "error"); }
   };
 
+  /** Tandai log QRIS expired. */
   const tandaiExpired = async (id) => {
     try {
       await invoke("expire_qris", { qrisLogId: id });
@@ -98,137 +123,159 @@ export default function Qris() {
     } catch (e) { addToast(`Gagal: ${e}`, "error"); }
   };
 
-  const statusIcon = (status) => {
-    if (status === "dibayar") return "check_circle";
-    if (status === "expired") return "timer_off";
-    if (status === "gagal") return "error";
-    return "hourglass_empty";
-  };
+  const historyColumns = [
+    {
+      key: "info", label: "QRIS",
+      render: (item) => (
+        <div>
+          <b>{rupiah(item.nominal)}</b>
+          <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+            {item.profile_nama || "Default"} · {formatDateTimeId(item.created_at)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "status", label: "Status",
+      render: (item) => <StatusBadge label={item.status} tone={statusTone(item.status)} />,
+    },
+    {
+      key: "aksi", label: "", align: "right",
+      render: (item) => (
+        item.status === "pending" ? (
+          <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+            <button type="button" className="btn-primary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => konfirmasiBayar(item.id)} title="Konfirmasi bayar">
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>check</span>
+            </button>
+            <button type="button" className="btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => tandaiExpired(item.id)} title="Tandai expired">
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
+            </button>
+          </div>
+        ) : null
+      ),
+    },
+  ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", height: "100%" }}>
-      <span className="text-headline-md">QRIS Dinamis</span>
+    <PageShell
+      eyebrow="PEMBAYARAN"
+      title="QRIS Dinamis"
+      description="Buat kode QR bayar sesuai nominal, lalu konfirmasi di riwayat setelah pelanggan transfer."
+      actions={
+        <button type="button" className="btn-secondary" onClick={loadHistory}>
+          <span className="material-symbols-outlined">refresh</span> Muat ulang
+        </button>
+      }
+      stats={[
+        { label: "Profil", value: profiles.length, icon: "qr_code_2" },
+        { label: "Pending", value: pendingCount, icon: "hourglass_empty", tone: pendingCount ? "#92400E" : undefined },
+        { label: "Dibayar", value: paidCount, icon: "check_circle", tone: "#047857" },
+      ]}
+    >
+      <InfoNote>
+        Pilih profil merchant, masukkan nominal, generate QR. Di tab Riwayat: centang = sudah dibayar, silang = expired.
+      </InfoNote>
 
-      {/* Tab switcher */}
-      <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", padding: "0.5rem", background: "var(--color-surface-container-low)" }}>
-        {["generate", "riwayat"].map((key) => (
-          <button key={key} type="button" onClick={() => setTab(key)}
-            className={tab === key ? "btn-primary" : "btn-secondary"}
-            style={{ padding: "8px 4px", fontSize: "13px" }}>
-            {key === "generate" ? "Generate QRIS" : "Riwayat QRIS"}
-          </button>
-        ))}
+      <div className="filter-row" style={{ marginBottom: 12 }}>
+        <button type="button" className={`filter-chip${tab === "generate" ? " active" : ""}`} onClick={() => setTab("generate")}>Generate QRIS</button>
+        <button type="button" className={`filter-chip${tab === "riwayat" ? " active" : ""}`} onClick={() => setTab("riwayat")}>Riwayat QRIS</button>
       </div>
 
       {tab === "generate" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem", flex: 1 }}>
-          {/* Profile selector */}
-          {profiles.length > 0 && (
-            <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "4px" }}>
-              {profiles.map((p) => (
-                <button key={p.id} type="button" onClick={() => setSelectedProfileId(p.id)} style={{
-                  flexShrink: 0, padding: "6px 14px", borderRadius: "999px", fontSize: "13px", fontWeight: 600,
-                  border: p.id === selectedProfileId ? "2px solid var(--color-primary)" : "1px solid var(--color-surface-border)",
-                  background: p.id === selectedProfileId ? "var(--color-primary)" : "var(--color-surface)",
-                  color: p.id === selectedProfileId ? "#fff" : "var(--color-text-primary)",
-                  cursor: "pointer",
-                }}>
-                  {p.nama}
-                </button>
-              ))}
+        <DataPanel
+          emptyIcon="qr_code"
+          emptyTitle=""
+          isEmpty={false}
+          loading={false}
+        >
+          {profiles.length === 0 ? (
+            <div className="empty-state">
+              <span className="material-symbols-outlined">qr_code_2</span>
+              <p>Belum ada profil QRIS</p>
+              <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>Tambah profil di pengaturan toko dulu.</p>
             </div>
-          )}
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {profiles.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`filter-chip${p.id === selectedProfileId ? " active" : ""}`}
+                    onClick={() => setSelectedProfileId(p.id)}
+                  >
+                    {p.nama}
+                  </button>
+                ))}
+              </div>
 
-          {/* Generate panel */}
-          <div className="card" style={{ textAlign: "center", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            {selectedProfile && <p className="text-headline-sm" style={{ marginBottom: "12px" }}>{selectedProfile.nama}</p>}
+              {selectedProfile && (
+                <p className="text-headline-sm" style={{ textAlign: "center" }}>{selectedProfile.nama}</p>
+              )}
 
-            <input className="input-field" inputMode="none" readOnly placeholder="Masukkan nominal"
-              value={nominal ? rupiah(nominal) : ""} onFocus={() => setShowKeypad(true)}
-              style={{ textAlign: "center", fontSize: "22px", fontWeight: 700, cursor: "text", minHeight: "52px", maxWidth: "280px", alignSelf: "center" }} />
+              <input
+                className="input-field"
+                inputMode="none"
+                readOnly
+                placeholder="Masukkan nominal"
+                value={nominal ? rupiah(nominal) : ""}
+                onFocus={() => setShowKeypad(true)}
+                style={{ textAlign: "center", fontSize: 22, fontWeight: 700, maxWidth: 320, margin: "0 auto", width: "100%" }}
+              />
 
-            {showKeypad && (
-              <div style={{ marginTop: "12px", borderTop: "1px solid var(--color-surface-border)", paddingTop: "12px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxWidth: "280px", margin: "0 auto" }}>
+              {showKeypad && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 280, margin: "0 auto", width: "100%" }}>
                   {keys.map((row, ri) => (
-                    <div key={ri} style={{ display: "flex", gap: "6px" }}>
+                    <div key={ri} style={{ display: "flex", gap: 6 }}>
                       {row.map((k, ki) => (
-                        <button key={ki} type="button" onClick={() => handleKey(k)}
-                          style={{
-                            flex: 1, padding: "14px 0", fontSize: "18px", fontWeight: 600,
-                            borderRadius: "10px", border: "1px solid var(--color-surface-border)",
-                            background: "var(--color-surface)", color: "var(--color-text-primary)",
-                            cursor: "pointer",
-                          }}>
+                        <button
+                          key={ki}
+                          type="button"
+                          className="btn-secondary"
+                          style={{ flex: 1, padding: "14px 0", fontSize: 18, fontWeight: 600 }}
+                          onClick={() => handleKey(k)}
+                        >
                           {k}
                         </button>
                       ))}
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
 
-            <button className="btn-primary" onClick={generateQris} disabled={loading || !nominal}
-              style={{ marginTop: "16px", maxWidth: "280px", alignSelf: "center", width: "100%" }}>
-              {loading ? <span className="spinner" style={{ width: "16px", height: "16px" }} /> : "Generate QRIS"}
-            </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={generateQris}
+                disabled={loading || !nominal}
+                style={{ maxWidth: 320, margin: "0 auto", width: "100%" }}
+              >
+                {loading ? "Generating..." : "Generate QRIS"}
+              </button>
 
-            {/* QRIS Image — centered dinamis */}
-            {qrisImage && (
-              <div style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                flex: 1, marginTop: "16px", minHeight: "200px",
-              }}>
-                <img src={qrisImage} alt="QRIS Code" style={{ maxWidth: "220px", maxHeight: "220px", borderRadius: "12px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }} />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* Riwayat QRIS tab */
-        <div className="card" style={{ padding: "1rem", flex: 1, overflowY: "auto" }}>
-          <h3 className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Riwayat QRIS</h3>
-          {history.length === 0 ? (
-            <p className="text-body-md" style={{ color: "var(--color-text-secondary)", textAlign: "center", padding: "2rem 0" }}>Belum ada riwayat QRIS</p>
-          ) : (
-            history.map((item) => {
-              const isPending = item.status === "pending";
-              return (
-                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 0", borderBottom: "1px solid var(--color-surface-border)" }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: "20px", color: statusColor[item.status] || "#999" }}>
-                    {statusIcon(item.status)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600 }}>{rupiah(item.nominal)}</span>
-                    <span className="text-label-md" style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px" }}>
-                      {item.profile_nama || "Default"} • {item.created_at?.slice(0, 16)}
-                    </span>
-                  </div>
-                  <span style={{
-                    fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "999px",
-                    color: "#fff", background: statusColor[item.status] || "#999",
-                  }}>
-                    {item.status}
-                  </span>
-                  {isPending && (
-                    <div style={{ display: "flex", gap: "4px" }}>
-                      <button type="button" className="btn-primary" style={{ padding: "4px 10px", fontSize: "11px", minHeight: 0 }}
-                        onClick={() => konfirmasiBayar(item.id)}>
-                        <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>check</span>
-                      </button>
-                      <button type="button" className="btn-secondary" style={{ padding: "4px 10px", fontSize: "11px", minHeight: 0 }}
-                        onClick={() => tandaiExpired(item.id)}>
-                        <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>close</span>
-                      </button>
-                    </div>
-                  )}
+              {qrisImage && (
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+                  <img src={qrisImage} alt="QRIS Code" style={{ maxWidth: 220, maxHeight: 220, borderRadius: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }} />
                 </div>
-              );
-            })
+              )}
+            </div>
           )}
-        </div>
+        </DataPanel>
+      ) : (
+        <DataPanel
+          searchValue={query}
+          onSearch={setQuery}
+          searchPlaceholder="Cari nominal / profil / status..."
+          onRefresh={loadHistory}
+          loading={historyLoading}
+          isEmpty={!historyLoading && filtered.length === 0}
+          emptyIcon="history"
+          emptyTitle="Belum ada riwayat QRIS"
+          emptyHint="Generate QRIS dulu di tab Generate."
+        >
+          <DataTable columns={historyColumns} rows={filtered} rowKey={(item) => item.id} />
+        </DataPanel>
       )}
-    </div>
+    </PageShell>
   );
 }

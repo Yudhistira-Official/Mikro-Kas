@@ -11,6 +11,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import RupiahInput from "../components/RupiahInput";
+import SearchSelect from "../components/SearchSelect";
 
 // Helper: normalisasi nomor telepon ke format wa.me
 // "0812345678" → "62812345678" (ganti 0 depan dengan 62, hapus non-digit)
@@ -37,7 +40,7 @@ export default function Supplier() {
   const [hargaList, setHargaList] = useState([]);
   const [produkAll, setProdukAll] = useState([]);
   const [hargaForm, setHargaForm] = useState({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
-  const [produkQuery, setProdukQuery] = useState("");
+
   const [query, setQuery] = useState("");
 
   // -------------------------------------------------------
@@ -94,7 +97,6 @@ export default function Supplier() {
         },
       });
       setHargaForm({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
-      setProdukQuery("");
       // Refresh list
       invoke("list_catatan_harga_supplier", { supplier_id: detailItem.id })
         .then(setHargaList)
@@ -252,25 +254,41 @@ export default function Supplier() {
     }
   };
 
+  // Close modals on Escape key
+  useEffect(() => {
+    /**
+     * Handles Escape keydown to close the currently open modal.
+     */
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        if (showForm) setShowForm(false);
+        else if (detailItem) setDetailItem(null);
+      }
+    };
+    if (showForm || detailItem) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [showForm, detailItem]);
+
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">MASTER DATA</p>
-          <h1 className="text-headline-lg">Daftar Supplier</h1>
-          <p className="text-body-md sales-page__subtitle">Menampilkan, menambah, mengubah, dan menghapus data supplier / pemasok barang.</p>
-        </div>
-        <button className="btn-primary sales-page__add" onClick={() => { setEditItem(null); setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" }); setShowForm(true); }}>
+    <PageShell
+      eyebrow="MASTER DATA"
+      title="Daftar Supplier"
+      description="Menampilkan, menambah, mengubah, dan menghapus data supplier / pemasok barang."
+      actions={
+        <>
+          <button className="btn-primary sales-page__add" onClick={() => { setEditItem(null); setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "" }); setShowForm(true); }}>
           <span className="material-symbols-outlined">add</span>Tambah Supplier
-        </button>
-      </header>
-
-      <section className="sales-stats">
-        <div className="sales-stat-card"><span className="material-symbols-outlined">local_shipping</span><div><span>Total Supplier</span><strong>{list.length}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">phone</span><div><span>Punya Telepon</span><strong>{list.filter(s => s.telepon).length}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">location_on</span><div><span>Punya Alamat</span><strong>{list.filter(s => s.alamat).length}</strong></div></div>
-      </section>
-
+          </button>
+        </>
+      }
+      stats={[
+        { label: "Total Supplier", value: list.length, icon: "local_shipping" },
+        { label: "Punya Telepon", value: list.filter(s => s.telepon).length, icon: "phone" },
+        { label: "Punya Alamat", value: list.filter(s => s.alamat).length, icon: "location_on" },
+      ]}
+    >
       <section className="sales-panel">
         <div className="sales-panel__toolbar">
           <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
@@ -302,8 +320,8 @@ export default function Supplier() {
           <div className="modal-content supplier-detail-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 430 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h3 className="text-headline-md">Detail Supplier</h3>
-              <button className="btn-icon" onClick={() => setDetailItem(null)}>
-                <span className="material-symbols-outlined">close</span>
+<button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setDetailItem(null)}>
+                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
@@ -414,26 +432,16 @@ export default function Supplier() {
 
               {/* Form tambah */}
               <form onSubmit={saveHarga} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem", padding: "0.75rem", borderRadius: "8px" }}>
-                 <input
-                   className="input-field supplier-product-select"
-                   list="supplier-product-options"
-                   value={produkQuery}
-                   onChange={(e) => {
-                     setProdukQuery(e.target.value);
-                     const found = produkAll.find((p) =>
-                       `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` === e.target.value
-                     );
-                     setHargaForm((prev) => ({ ...prev, produk_id: found ? String(found.id) : "" }));
-                   }}
-                   placeholder="Ketik nama atau SKU produk..."
-                 />
-                 <datalist id="supplier-product-options">
-                   {produkAll.map((p) => (
-                     <option key={p.id} value={`${p.nama}${p.sku ? ` — ${p.sku}` : ""}`} />
-                   ))}
-                 </datalist>
+                  <SearchSelect
+                    className="input-field supplier-product-select"
+                    value={hargaForm.produk_id}
+                    onChange={(value) => setHargaForm((prev) => ({ ...prev, produk_id: value }))}
+                    placeholder="Ketik nama atau SKU produk..."
+                    options={produkAll.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))}
+                    required
+                  />
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.5rem" }}>
-                  <input className="input-field" type="number" placeholder="Harga satuan" value={hargaForm.harga} onChange={(e) => setHargaForm((p) => ({ ...p, harga: e.target.value }))} required />
+                  <RupiahInput value={hargaForm.harga} onChange={(val) => setHargaForm((p) => ({ ...p, harga: val }))} placeholder="Harga satuan" required />
                   <input className="input-field" value={hargaForm.satuan} onChange={(e) => setHargaForm((p) => ({ ...p, satuan: e.target.value }))} placeholder="pcs" />
                 </div>
                 <input className="input-field" value={hargaForm.catatan} onChange={(e) => setHargaForm((p) => ({ ...p, catatan: e.target.value }))} placeholder="Catatan (opsional)" />
@@ -469,7 +477,12 @@ export default function Supplier() {
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="text-headline-md" style={{ marginBottom: "1rem" }}>{editItem ? "Edit Supplier" : "Tambah Supplier"}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3 className="text-headline-md" style={{ margin: 0 }}>{editItem ? "Edit Supplier" : "Tambah Supplier"}</h3>
+              <button type="button" className="btn-icon" aria-label="Tutup" onClick={() => { setShowForm(false); setEditItem(null); }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
             <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               <div>
                 <label className="input-label">Nama *</label>
@@ -502,6 +515,6 @@ export default function Supplier() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

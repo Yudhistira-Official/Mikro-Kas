@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import { formatDateId } from "../utils/dateFormat";
+import SearchSelect from "../components/SearchSelect";
 
 export default function Pengiriman() {
   const { addToast } = useToast();
@@ -23,6 +26,16 @@ export default function Pengiriman() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Escape closes the form modal when no submission is in progress.
+  useEffect(() => {
+    /** Handles Escape for the shipping form modal. */
+    const handleEscape = (event) => { if (event.key === "Escape" && showForm) setShowForm(false); };
+    if (showForm) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [showForm]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -69,25 +82,24 @@ export default function Pengiriman() {
   const statusColor = { diproses: "#f59e0b", dikirim: "#3b82f6", diterima: "#22c55e", batal: "#ef4444" };
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">OPERASIONAL</p>
-          <h1 className="text-headline-lg">Pengiriman</h1>
-          <p className="text-body-md sales-page__subtitle">Kelola alamat tujuan, nomor resi, dan status pengiriman pesanan.</p>
-        </div>
-        <button className="btn-primary sales-page__add" onClick={() => setShowForm(true)}>
+    <PageShell
+      eyebrow="OPERASIONAL"
+      title="Pengiriman"
+      description="Kelola alamat tujuan, nomor resi, dan status pengiriman pesanan."
+      actions={
+        <>
+          <button className="btn-primary sales-page__add" onClick={() => setShowForm(true)}>
           <span className="material-symbols-outlined">add</span>Tambah Pengiriman
-        </button>
-      </header>
-
-      <section className="sales-stats">
-        <div className="sales-stat-card"><span className="material-symbols-outlined">local_shipping</span><div><span>Total Pengiriman</span><strong>{data.length}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">pending</span><div><span>Diproses</span><strong>{statusCount("diproses")}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">inventory_2</span><div><span>Dikirim</span><strong>{statusCount("dikirim")}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">task_alt</span><div><span>Diterima</span><strong>{statusCount("diterima")}</strong></div></div>
-      </section>
-
+          </button>
+        </>
+      }
+      stats={[
+        { label: "Total Pengiriman", value: data.length, icon: "local_shipping" },
+        { label: "Diproses", value: statusCount("diproses"), icon: "pending" },
+        { label: "Dikirim", value: statusCount("dikirim"), icon: "inventory_2" },
+        { label: "Diterima", value: statusCount("diterima"), icon: "task_alt" },
+      ]}
+    >
       <section className="sales-panel">
         <div className="sales-panel__toolbar">
           <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari ID transaksi, resi, ekspedisi, atau kota..." /></div>
@@ -100,15 +112,15 @@ export default function Pengiriman() {
               <td><strong>{item.kota || "-"}</strong><small style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 11 }}>{item.provinsi || item.alamat_kirim || "-"}</small></td>
               <td>{item.ekspedisi || "-"}</td>
               <td style={{ fontWeight: 600 }}>{item.no_resi || "-"}</td>
-              <td style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>{item.tgl_kirim?.slice(0, 10) || "-"}</td>
+              <td style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>{formatDateId(item.tgl_kirim)}</td>
               <td><span style={{ color: statusColor[item.status] || "var(--color-text-secondary)", fontWeight: 700, fontSize: 12 }}>{statusLabel[item.status] || item.status}</span></td>
-              <td><div className="sales-row-actions"><select className="input-field" style={{ minWidth: 110, padding: "6px 8px", fontSize: 12 }} value={item.status} onChange={(e) => updateStatus(item.id, e.target.value)}><option value="diproses">Diproses</option><option value="dikirim">Dikirim</option><option value="diterima">Diterima</option><option value="batal">Batal</option></select></div></td>
+              <td><div className="sales-row-actions"><SearchSelect style={{ minWidth: 140 }} value={item.status} onChange={(value) => updateStatus(item.id, value)} options={[{ value: "diproses", label: "Diproses" }, { value: "dikirim", label: "Dikirim" }, { value: "diterima", label: "Diterima" }, { value: "batal", label: "Batal" }]} placeholder="Status" /></div></td>
             </tr>)}
           </tbody></table></div>
         )}
       </section>
 
-      {showForm && <div className="modal-overlay" onClick={() => setShowForm(false)}><div className="modal-content" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><h2 className="text-headline-md">Tambah Pengiriman</h2><p className="text-body-md">Masukkan detail tujuan pengiriman pesanan.</p></div><button className="btn-icon" onClick={() => setShowForm(false)}><span className="material-symbols-outlined">close</span></button></div><form onSubmit={handleSubmit} className="sales-form">
+      {showForm && <div className="modal-overlay" onClick={() => setShowForm(false)}><div className="modal-content" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><h2 className="text-headline-md">Tambah Pengiriman</h2><p className="text-body-md">Masukkan detail tujuan pengiriman pesanan.</p></div><button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setShowForm(false)}><span className="material-symbols-outlined">close</span></button></div><form onSubmit={handleSubmit} className="sales-form">
         <label className="input-label">ID Transaksi *<input className="input-field" inputMode="numeric" placeholder="Masukkan ID transaksi" value={form.transaksi_id} onChange={(e) => setForm((p) => ({ ...p, transaksi_id: e.target.value.replace(/\D/g, "") }))} /></label>
         <label className="input-label">Alamat Kirim<input className="input-field" placeholder="Alamat lengkap" value={form.alamat_kirim} onChange={(e) => setForm((p) => ({ ...p, alamat_kirim: e.target.value }))} /></label>
         <label className="input-label">Kota<input className="input-field" value={form.kota} onChange={(e) => setForm((p) => ({ ...p, kota: e.target.value }))} /></label>
@@ -119,6 +131,6 @@ export default function Pengiriman() {
         <label className="input-label">Catatan<input className="input-field" value={form.catatan} onChange={(e) => setForm((p) => ({ ...p, catatan: e.target.value }))} /></label>
         <div className="sales-form__actions"><button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Batal</button><button type="submit" className="btn-primary">Simpan</button></div>
       </form></div></div>}
-    </div>
+    </PageShell>
   );
 }

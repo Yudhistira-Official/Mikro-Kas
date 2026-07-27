@@ -8,13 +8,14 @@
 //
 // Setiap navigasi & error dicatat ke file log via Rust logger.
 // ============================================================
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ToastProvider } from "./hooks/useToast";
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "./utils/ipc";
 import DesktopLayout from "./layouts/DesktopLayout";
 import MobileLayout from "./layouts/MobileLayout";
 import { usePlatform } from "./layouts/usePlatform";
+import { applyWindowMode } from "./utils/windowMode";
 
 // Android WebView pada perangkat ini crash saat memuat Vite dynamic chunks
 // (TypeError: z is not a function). Semua halaman memakai static import.
@@ -26,6 +27,7 @@ import Kas from "./pages/Kas";
 import Qris from "./pages/Qris";
 import TokoSetup from "./pages/TokoSetup";
 import Profile from "./pages/Profile";
+import Sistem from "./pages/Sistem";
 import Keuangan from "./pages/Keuangan";
 import Pembelian from "./pages/Pembelian";
 import Riwayat from "./pages/Riwayat";
@@ -60,6 +62,7 @@ import Perakitan from "./pages/Perakitan";
 import HppManagement from "./pages/HppManagement";
 import DatabaseMaintenance from "./pages/DatabaseMaintenance";
 import MultiHarga from "./pages/MultiHarga";
+import Login from "./pages/Login";
 
 // ============================================================
 // Logger JS → Rust (fire-and-forget, tidak throw).
@@ -125,8 +128,11 @@ function RouteTracker() {
 
 function App() {
   const platform = usePlatform();
+  const navigate = useNavigate();
   const [tokoReady, setTokoReady] = useState(null);
   const [errorLog, setErrorLog] = useState("");
+  const [currentUser, setCurrentUser] = useState(undefined);
+  const [loggingOut, setLoggingOut] = useState(false);
   
   const AppLayout = platform === "mobile" ? MobileLayout : DesktopLayout;
 
@@ -152,9 +158,16 @@ function App() {
       jslog("APP: bootstrap errors: " + JSON.stringify(early));
     }
     fetchToko();
+    applyWindowMode();
+    invoke("get_current_user").then(setCurrentUser).catch(() => setCurrentUser(null));
     const handler = () => {
       jslog("APP: toko-saved event, refresh");
       fetchToko();
+      applyWindowMode();
+    };
+    // Re-fetch session user setelah data user diubah (clear notifikasi password default)
+    const userHandler = () => {
+      invoke("get_current_user").then(setCurrentUser).catch(() => {});
     };
     // Audit UI global: catat tombol/link/label upload tanpa perlu menambah
     // logger di setiap halaman. Isi formulir, payload QRIS, dan data sensitif tidak dicatat.
@@ -166,15 +179,31 @@ function App() {
       jslog(`UI: klik ${target.tagName.toLowerCase()}=${action}; route=${window.location.pathname}`);
     };
     window.addEventListener("toko-saved", handler);
+    window.addEventListener("user-updated", userHandler);
     document.addEventListener("click", auditClick);
     return () => {
       window.removeEventListener("toko-saved", handler);
+      window.removeEventListener("user-updated", userHandler);
       document.removeEventListener("click", auditClick);
       jslog("APP: App unmount");
     };
   }, [fetchToko]);
 
-  if (tokoReady === null) {
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await invoke("logout_user");
+      setCurrentUser(null);
+      navigate("/login", { replace: true });
+    } catch (error) {
+      jslog(`APP: logout gagal → ${error}`);
+      setErrorLog("Gagal keluar. Coba lagi.");
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
+  if (tokoReady === null || currentUser === undefined) {
     return (
       <div className="loading-page" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px' }}>
         <div className="spinner" />
@@ -184,17 +213,31 @@ function App() {
     );
   }
 
+  if (currentUser === null) {
+    return <ToastProvider><Routes><Route path="/login" element={<Login onLogin={setCurrentUser} />} /><Route path="*" element={<Navigate to="/login" replace />} /></Routes></ToastProvider>;
+  }
+
   return (
     <ToastProvider>
       <RouteTracker />
+      {errorLog && <div role="alert" style={{ position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 30, padding: "8px 12px", borderRadius: "8px", background: "var(--color-error)", color: "white", fontSize: "13px" }}>{errorLog}</div>}
+      {currentUser.must_change_password && <div role="status" style={{ position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 20, padding: "8px 12px", borderRadius: "8px", background: "var(--color-warning, #fff3cd)", color: "var(--color-on-warning, #664d03)", fontSize: "13px" }}>Password default masih aktif. Segera ubah password melalui Pengaturan &gt; Data User.</div>}
+      {platform === "mobile" && (
+        <div style={{ position: "fixed", top: 8, right: 12, zIndex: 20, display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+          <span>{currentUser.nama_lengkap || currentUser.username}</span>
+          <button type="button" className="btn-secondary" onClick={handleLogout} disabled={loggingOut} style={{ padding: "4px 8px" }}>{loggingOut ? "Keluar…" : "Keluar"}</button>
+        </div>
+      )}
       <Routes>
-        <Route element={<AppLayout />}>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route element={<AppLayout currentUser={currentUser} onLogout={handleLogout} loggingOut={loggingOut} />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/produk" element={<Produk />} />
           <Route path="/transaksi" element={<Transaksi />} />
           <Route path="/kas" element={<Kas />} />
           <Route path="/qris" element={platform === "mobile" ? <Qris /> : <Navigate to="/" replace />} />
           <Route path="/toko" element={<Profile />} />
+          <Route path="/sistem" element={<Sistem />} />
           <Route path="/qris-setup" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
           <Route path="/profile" element={<Navigate to="/toko" replace />} />
           <Route path="/keuangan" element={<Keuangan />} />

@@ -1,249 +1,213 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, StatusBadge } from "../components/PageKit";
+import { formatDateId } from "../utils/dateFormat";
+import SearchSelect from "../components/SearchSelect";
+import BarcodeScanner from "../components/BarcodeScanner";
 
-/**
- * SerialManagement — tampilan daftar serial number per produk.
- *
- * Flow:
- * 1. Load semua produk aktif untuk datalist search.
- * 2. User pilih produk via input search (nama/SKU).
- * 3. Load list serial produk terpilih.
- * 4. Tampilkan serial dalam tabel dengan status badge.
- */
 export default function SerialManagement() {
   const { addToast } = useToast();
-
-  /** Daftar produk aktif untuk datalist */
   const [produkList, setProdukList] = useState([]);
-  /** Serial number list produk terpilih */
-  const [serials, setSerials] = useState([]);
-  /** Teks search produk (nama tampilan) */
-  const [searchProduk, setSearchProduk] = useState("");
-  /** Produk ID yang sedang aktif */
-  const [aktivProdukId, setAktivProdukId] = useState(null);
-  /** Nama produk aktif untuk display */
-  const [aktivProdukNama, setAktivProdukNama] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState("");
+  const [produkId, setProdukId] = useState("");
+  const [serialNumber, setSerialNumber] = useState("");
+  const [items, setItems] = useState([]);
+  const [refNumber, setRefNumber] = useState("");
+  const [kasir, setKasir] = useState("");
+  const [transactionType, setTransactionType] = useState("Penjualan / Barang Keluar");
+  const [scanOpen, setScanOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [historyProdukId, setHistoryProdukId] = useState("");
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  /** Load produk list sekali saat mount */
   useEffect(() => {
     invoke("list_produk", { onlyActive: true })
       .then((data) => setProdukList(data || []))
       .catch((e) => addToast(String(e), "error"));
-  }, []);
+  }, [addToast]);
 
-  /** Load serial saat produk aktif berubah */
-  const loadSerials = async (produkId) => {
-    if (!produkId) return;
-    setLoading(true);
+  const selectedProduct = produkList.find((p) => String(p.id) === String(produkId));
+  const historyProduct = produkList.find((p) => String(p.id) === String(historyProdukId));
+
+  const checkSerial = async () => {
+    const value = serialNumber.trim();
+    if (!selectedProduct) return addToast("Pilih produk terlebih dahulu", "error");
+    if (!value) return addToast("Input nomor seri wajib diisi", "error");
+    if (items.some((item) => item.serialNumber.toLowerCase() === value.toLowerCase())) {
+      return addToast("Nomor seri sudah ada di daftar", "error");
+    }
+
+    setChecking(true);
     try {
-      const data = await invoke("list_serial", { produk_id: produkId });
-      setSerials(data || []);
+      const result = await invoke("check_serial_number", { serialNumber: value });
+      if (!result.exists) return addToast("Nomor seri tidak ditemukan di database", "error");
+      if (result.produk_id !== selectedProduct.id) return addToast("Nomor seri bukan milik produk yang dipilih", "error");
+      if (result.status !== "ready") return addToast(`Nomor seri tidak tersedia: ${result.status}`, "error");
+      setItems((current) => [...current, {
+        serialId: result.id,
+        produkId: selectedProduct.id,
+        kode: selectedProduct.sku || "—",
+        nama: selectedProduct.nama,
+        serialNumber: result.serial_number || value,
+        status: "Tersedia",
+      }]);
+      setSerialNumber("");
+      addToast("Nomor seri terverifikasi", "success");
     } catch (e) {
-      addToast(String(e), "error");
+      addToast(`Gagal cek serial: ${e}`, "error");
     } finally {
-      setLoading(false);
+      setChecking(false);
     }
   };
 
-  /**
-   * Saat user memilih dari datalist, cari produk yang cocok dan set aktif.
-   * Cocokkan berdasarkan nilai input (nama + SKU).
-   */
-  const handleProdukChange = (e) => {
-    const val = e.target.value;
-    setSearchProduk(val);
-    // Cari produk yang labelnya cocok persis
-    const match = produkList.find(
-      (p) => `${p.nama}${p.sku ? " — " + p.sku : ""}` === val
-    );
-    if (match) {
-      setAktivProdukId(match.id);
-      setAktivProdukNama(match.nama);
-      loadSerials(match.id);
-    } else {
-      setAktivProdukId(null);
-      setAktivProdukNama("");
-      setSerials([]);
+  const handleScan = (value) => {
+    setScanOpen(false);
+    setSerialNumber(value || "");
+  };
+
+  const removeItem = (serialId) => setItems((current) => current.filter((item) => item.serialId !== serialId));
+
+  const finalize = async () => {
+    if (!refNumber.trim()) return addToast("No. referensi/nota wajib diisi", "error");
+    if (items.length === 0) return addToast("Tambahkan minimal satu nomor seri", "error");
+    setSaving(true);
+    try {
+      await invoke("finalize_serial_transaction", {
+        input: {
+          refNumber: refNumber.trim(),
+          items: items.map((item) => ({ serialId: item.serialId, produkId: item.produkId })),
+        },
+      });
+      addToast("Nomor seri berhasil dikunci sebagai terjual", "success");
+      setItems([]);
+      setSerialNumber("");
+      if (historyProdukId) void loadHistory(historyProdukId);
+    } catch (e) {
+      addToast(`Gagal menyelesaikan transaksi: ${e}`, "error");
+    } finally {
+      setSaving(false);
     }
   };
 
-  /** Filter serial berdasarkan query search tabel */
-  const filteredSerials = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return serials;
-    return serials.filter((s) =>
-      `${s.serial_number} ${s.status}`.toLowerCase().includes(term)
-    );
-  }, [serials, query]);
-
-  /** Hitung ringkasan status serial */
-  const totalReady = serials.filter((s) => s.status === "ready").length;
-  const totalTerjual = serials.filter((s) => s.status === "terjual").length;
-
-  /**
-   * Tentukan kelas badge berdasarkan status serial.
-   * ready → success, terjual → warning, lainnya → default
-   */
-  const badgeClass = (status) => {
-    if (status === "ready") return "badge badge-success";
-    if (status === "terjual") return "badge badge-warning";
-    return "badge badge-empty";
+  const loadHistory = async (id) => {
+    setHistoryProdukId(id);
+    if (!id) return setHistory([]);
+    setHistoryLoading(true);
+    try {
+      setHistory(await invoke("list_serial", { produkId: Number(id) }));
+    } catch (e) {
+      addToast(`Gagal memuat riwayat serial: ${e}`, "error");
+    } finally {
+      setHistoryLoading(false);
+    }
   };
+
+  const readyCount = history.filter((s) => s.status === "ready").length;
+  const soldCount = history.filter((s) => s.status === "terjual").length;
+  const productOptions = produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }));
+  const currentTime = new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">INVENTARIS</p>
-          <h1 className="text-headline-lg">Serial Management</h1>
-          <p className="text-body-md sales-page__subtitle">
-            Lacak serial number produk: status, gudang, dan histori transaksi.
-          </p>
-        </div>
-      </header>
-
-      {/* Stat cards — tampil hanya saat ada produk aktif */}
-      {aktivProdukId && (
-        <section className="sales-stats">
-          <div className="sales-stat-card">
-            <span className="material-symbols-outlined">inventory_2</span>
-            <div>
-              <span>Total Serial</span>
-              <strong>{serials.length}</strong>
-            </div>
-          </div>
-          <div className="sales-stat-card">
-            <span className="material-symbols-outlined">check_circle</span>
-            <div>
-              <span>Ready</span>
-              <strong>{totalReady}</strong>
-            </div>
-          </div>
-          <div className="sales-stat-card">
-            <span className="material-symbols-outlined">shopping_bag</span>
-            <div>
-              <span>Terjual</span>
-              <strong>{totalTerjual}</strong>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Panel pencarian & tabel */}
-      <section className="sales-panel">
-        <div className="sales-panel__toolbar">
-          {/* Datalist search produk */}
-          <div className="sales-search" style={{ maxWidth: 320 }}>
-            <span className="material-symbols-outlined">barcode_scanner</span>
-            <input
-              list="produk-datalist"
-              placeholder="Cari produk…"
-              value={searchProduk}
-              onChange={handleProdukChange}
-            />
-            <datalist id="produk-datalist">
-              {produkList.map((p) => (
-                <option
-                  key={p.id}
-                  value={`${p.nama}${p.sku ? " — " + p.sku : ""}`}
-                />
-              ))}
-            </datalist>
-          </div>
-
-          {/* Search dalam tabel serial — aktif hanya saat ada produk dipilih */}
-          {aktivProdukId && (
-            <div className="sales-search">
-              <span className="material-symbols-outlined">search</span>
-              <input
-                placeholder="Cari serial / status…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-          )}
+    <PageShell
+      eyebrow="INVENTARIS"
+      title="Serial Management"
+      description="Validasi nomor seri/IMEI pada barang keluar. Stok berkurang saat checkout; penyelesaian di sini hanya mengunci serial menjadi terjual."
+      stats={historyProdukId ? [
+        { label: "Total Serial", value: history.length, icon: "inventory_2" },
+        { label: "Tersedia", value: readyCount, icon: "check_circle" },
+        { label: "Terjual", value: soldCount, icon: "shopping_bag" },
+      ] : []}
+    >
+      <section className="sales-panel" style={{ marginBottom: 16 }}>
+        <div className="sales-panel__toolbar" style={{ alignItems: "flex-end" }}>
+          <label className="input-label" style={{ flex: "1 1 220px" }}>
+            No. Referensi / Nota
+            <input className="input-field" value={refNumber} onChange={(e) => setRefNumber(e.target.value)} placeholder="TRX-20260727-001" />
+          </label>
+          <label className="input-label" style={{ flex: "1 1 180px" }}>
+            Tanggal / Waktu
+            <input className="input-field" value={currentTime} readOnly />
+          </label>
+          <label className="input-label" style={{ flex: "1 1 180px" }}>
+            ID / Nama Kasir
+            <input className="input-field" value={kasir} onChange={(e) => setKasir(e.target.value)} placeholder="Nama kasir" />
+          </label>
+          <label className="input-label" style={{ flex: "1 1 200px" }}>
+            Tipe Transaksi
+            <select className="input-field" value={transactionType} onChange={(e) => setTransactionType(e.target.value)}>
+              <option>Penjualan / Barang Keluar</option>
+              <option>Retur / Barang Masuk</option>
+            </select>
+          </label>
         </div>
 
-        {/* State: belum pilih produk */}
-        {!aktivProdukId && (
-          <div
-            style={{
-              padding: "48px 24px",
-              textAlign: "center",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <span
-              className="material-symbols-outlined"
-              style={{ fontSize: 40, marginBottom: 8, display: "block" }}
-            >
-              numbers
-            </span>
-            <p>Pilih produk di atas untuk melihat daftar serial number.</p>
-          </div>
-        )}
+        <div className="store-profile-help" style={{ margin: "12px 0" }}>
+          <span className="material-symbols-outlined">verified_user</span>
+          <span>Cek database memastikan serial tersedia, cocok dengan produk, dan belum pernah terjual.</span>
+        </div>
 
-        {/* State: loading */}
-        {aktivProdukId && loading && (
-          <div style={{ padding: "32px 24px", textAlign: "center", color: "var(--color-text-secondary)" }}>
-            Memuat serial…
-          </div>
-        )}
+        <div className="sales-panel__toolbar" style={{ alignItems: "flex-end" }}>
+          <label className="input-label" style={{ flex: "1 1 240px" }}>
+            Produk
+            <SearchSelect value={produkId} onChange={setProdukId} options={productOptions} placeholder="Pilih produk..." />
+          </label>
+          <label className="input-label" style={{ flex: "1 1 260px" }}>
+            Scan / Input Nomor Seri (SN / IMEI)
+            <input className="input-field" value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void checkSerial(); } }} placeholder="Scan barcode atau ketik SN/IMEI" />
+          </label>
+          <button type="button" className="btn-secondary" onClick={() => setScanOpen(true)}>
+            <span className="material-symbols-outlined">barcode_scanner</span> Scan Barcode SN
+          </button>
+          <button type="button" className="btn-primary" onClick={checkSerial} disabled={checking}>
+            {checking ? "Mengecek..." : "Cek Database"}
+          </button>
+        </div>
 
-        {/* Tabel serial */}
-        {aktivProdukId && !loading && (
-          <div className="sales-table-wrap">
-            <table className="sales-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Serial Number</th>
-                  <th>Status</th>
-                  <th>Gudang ID</th>
-                  <th>Transaksi ID</th>
-                  <th>Dibuat</th>
+        <div className="sales-table-wrap" style={{ marginTop: 16 }}>
+          <table className="sales-table">
+            <thead><tr><th>No</th><th>Kode Barang</th><th>Nama Produk</th><th>Qty</th><th>Nomor Seri / IMEI</th><th>Status</th><th>Aksi</th></tr></thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, color: "var(--color-text-secondary)" }}>Belum ada serial yang dipilih.</td></tr>
+              ) : items.map((item, index) => (
+                <tr key={item.serialId}>
+                  <td>{index + 1}</td><td>{item.kode}</td><td><b>{item.nama}</b></td><td>1</td>
+                  <td><code>{item.serialNumber}</code></td>
+                  <td><StatusBadge label={item.status} tone="success" /></td>
+                  <td><button type="button" className="btn-secondary" onClick={() => removeItem(item.serialId)}>Hapus Item</button></td>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredSerials.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        textAlign: "center",
-                        padding: "32px",
-                        color: "var(--color-text-secondary)",
-                      }}
-                    >
-                      {query ? "Tidak ada serial yang cocok." : `Belum ada serial untuk ${aktivProdukNama}.`}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSerials.map((s, i) => (
-                    <tr key={s.id}>
-                      <td style={{ color: "var(--color-text-secondary)" }}>{i + 1}</td>
-                      <td>
-                        <code style={{ fontSize: 12 }}>{s.serial_number}</code>
-                      </td>
-                      <td>
-                        <span className={badgeClass(s.status)}>{s.status}</span>
-                      </td>
-                      <td>{s.gudang_id}</td>
-                      <td>{s.transaksi_id ?? "—"}</td>
-                      <td style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>
-                        {s.created_at?.slice(0, 10)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button type="button" className="btn-primary" onClick={finalize} disabled={saving || items.length === 0}>
+            {saving ? "Menyelesaikan..." : "Simpan / Selesaikan"}
+          </button>
+        </div>
+      </section>
+
+      <DataPanel
+        toolbarExtra={<label className="input-label" style={{ minWidth: 260 }}>Lihat Riwayat Produk <SearchSelect value={historyProdukId} onChange={loadHistory} options={productOptions} placeholder="Pilih produk..." /></label>}
+        loading={historyLoading}
+        isEmpty={!historyLoading && historyProdukId && history.length === 0}
+        emptyIcon="history"
+        emptyTitle="Belum ada serial"
+        emptyHint={historyProduct ? `Belum ada serial untuk ${historyProduct.nama}.` : "Pilih produk untuk melihat riwayat."}
+      >
+        {historyProdukId && !historyLoading && history.length > 0 && (
+          <div className="sales-table-wrap">
+            <table className="sales-table"><thead><tr><th>#</th><th>Nomor Seri / IMEI</th><th>Status</th><th>Transaksi</th><th>Dibuat</th></tr></thead>
+              <tbody>{history.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td><code>{item.serial_number}</code></td><td><StatusBadge label={item.status} tone={item.status === "ready" ? "success" : "warning"} /></td><td>{item.transaksi_id || "—"}</td><td>{formatDateId(item.created_at)}</td></tr>)}</tbody>
             </table>
           </div>
         )}
-      </section>
-    </div>
+      </DataPanel>
+
+      {scanOpen && <BarcodeScanner onDetected={handleScan} onClose={() => setScanOpen(false)} />}
+    </PageShell>
   );
 }

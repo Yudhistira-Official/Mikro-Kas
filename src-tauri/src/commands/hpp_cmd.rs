@@ -38,10 +38,20 @@ pub struct StokBatchInput {
 
 /// Hasil perhitungan HPP.
 #[derive(Debug, Serialize)]
+pub struct HppLayer {
+    pub batch_id: i64,
+    pub qty_ambil: i64,
+    pub harga_beli: i64,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct HppResult {
     pub total_hpp: i64,
     pub qty_terpenuhi: i64,
     pub batches_used: Vec<i64>,
+    pub layers: Vec<HppLayer>,
+    pub saldo_layers: Vec<HppLayer>,
 }
 
 /// Tambah batch stok masuk.
@@ -108,21 +118,39 @@ pub fn hitung_hpp_fifo(
     let mut sisa = qty_jual;
     let mut total_hpp = 0i64;
     let mut used = Vec::new();
+    let mut layers = Vec::new();
+    let mut saldo_layers = Vec::new();
 
     for (batch_id, qty_sisa, harga_beli) in &mut batches {
-        if sisa == 0 {
-            break;
-        }
-        let ambil = (*qty_sisa).min(sisa);
+        let ambil = if sisa == 0 { 0 } else { (*qty_sisa).min(sisa) };
         total_hpp += ambil * (*harga_beli);
         sisa -= ambil;
-        used.push(*batch_id);
+        if ambil > 0 {
+            used.push(*batch_id);
+            layers.push(HppLayer {
+                batch_id: *batch_id,
+                qty_ambil: ambil,
+                harga_beli: *harga_beli,
+                total: ambil * (*harga_beli),
+            });
+        }
+        let remaining = *qty_sisa - ambil;
+        if remaining > 0 {
+            saldo_layers.push(HppLayer {
+                batch_id: *batch_id,
+                qty_ambil: remaining,
+                harga_beli: *harga_beli,
+                total: remaining * (*harga_beli),
+            });
+        }
     }
 
     Ok(HppResult {
         total_hpp,
         qty_terpenuhi: qty_jual - sisa,
         batches_used: used,
+        layers,
+        saldo_layers,
     })
 }
 
@@ -164,20 +192,38 @@ pub fn hitung_hpp_lifo(
     let mut sisa = qty_jual;
     let mut total_hpp = 0i64;
     let mut used = Vec::new();
+    let mut layers = Vec::new();
+    let mut saldo_layers = Vec::new();
 
     for (batch_id, qty_sisa, harga_beli) in &mut batches {
-        if sisa == 0 {
-            break;
-        }
-        let ambil = (*qty_sisa).min(sisa);
+        let ambil = if sisa == 0 { 0 } else { (*qty_sisa).min(sisa) };
         total_hpp += ambil * (*harga_beli);
         sisa -= ambil;
-        used.push(*batch_id);
+        if ambil > 0 {
+            used.push(*batch_id);
+            layers.push(HppLayer {
+                batch_id: *batch_id,
+                qty_ambil: ambil,
+                harga_beli: *harga_beli,
+                total: ambil * (*harga_beli),
+            });
+        }
+        let remaining = *qty_sisa - ambil;
+        if remaining > 0 {
+            saldo_layers.push(HppLayer {
+                batch_id: *batch_id,
+                qty_ambil: remaining,
+                harga_beli: *harga_beli,
+                total: remaining * (*harga_beli),
+            });
+        }
     }
 
     Ok(HppResult {
         total_hpp,
         qty_terpenuhi: qty_jual - sisa,
         batches_used: used,
+        layers,
+        saldo_layers,
     })
 }

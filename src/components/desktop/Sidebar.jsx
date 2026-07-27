@@ -2,9 +2,12 @@
 // Sidebar.jsx — Desktop navigation sidebar
 // Logo MikroKas + nama toko di header, collapsible sections
 // ============================================================
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../../utils/ipc";
+import { setKasirMode } from "../../utils/kasirMode";
+import { useToast } from "../../hooks/useToast";
+import { pageSearchText, pageSnippet } from "../../utils/pageCatalog";
 
 // Section icons mapping
 const SECTION_ICONS = {
@@ -25,6 +28,7 @@ const menuSections = [
     label: "Utama",
     items: [
       { path: "/dashboard", label: "Dashboard", icon: "dashboard", desc: "Ringkasan penjualan, keuntungan, dan laporan harian" },
+      { path: "/transaksi", label: "Kasir", icon: "point_of_sale", desc: "Transaksi penjualan, checkout, pembayaran tunai dan QRIS" },
     ],
   },
   {
@@ -51,7 +55,6 @@ const menuSections = [
   {
     label: "Penjualan",
     items: [
-      { path: "/transaksi", label: "Penjualan Kasir", icon: "point_of_sale", desc: "Transaksi penjualan, checkout, pembayaran tunai dan QRIS" },
       { path: "/pesanan", label: "Pesanan Penjualan", icon: "description", desc: "Kelola pesanan pelanggan sebelum diproses kasir" },
       { path: "/retur", label: "Retur Penjualan", icon: "keyboard_return", desc: "Proses pengembalian barang dan refund pelanggan" },
       { path: "/tukar-tambah", label: "Tukar Tambah", icon: "swap_horiz", desc: "Proses tukar tambah produk dengan selisih harga" },
@@ -75,7 +78,7 @@ const menuSections = [
     label: "Persediaan",
     items: [
       { path: "/stock-opname", label: "Stok Opname", icon: "fact_check", desc: "Penghitungan stok fisik dan sinkronisasi dengan sistem" },
-      { path: "/riwayat-stok", label: "Riwayat Stok", icon: "history", desc: "Rekam jejak perubahan stok masuk dan keluar" },
+      { path: "/riwayat-stok", label: "Riwayat Stok", icon: "history", desc: "Rekam jejak audit penyesuaian stok masuk dan keluar" },
       { path: "/serial", label: "Serial Number", icon: "numbers", desc: "Pelacakan produk berdasarkan nomor seri unik" },
       { path: "/hpp", label: "HPP FIFO/LIFO", icon: "stacked_line_chart", desc: "Hitung harga pokok penjualan metode FIFO atau LIFO" },
     ],
@@ -101,7 +104,8 @@ const menuSections = [
     label: "Pengaturan",
     items: [
       { path: "/users", label: "Data User", icon: "manage_accounts", desc: "Kelola akun pengguna, hak akses, dan PIN kasir" },
-      { path: "/toko", label: "Data Perusahaan", icon: "storefront", desc: "Nama toko, alamat, logo, dan profil QRIS" },
+      { path: "/toko", label: "Data Perusahaan", icon: "storefront", desc: "Nama toko, alamat, logo, identitas, dan profil QRIS" },
+      { path: "/sistem", label: "Sistem", icon: "tune", desc: "Pengaturan UI, tema, tampilan jendela, fullscreen, windowed, printer, scanner barcode" },
       { path: "/nomor-transaksi", label: "Setting Nomor", icon: "tag", desc: "Format dan penomoran otomatis transaksi" },
       { path: "/pajak", label: "Pengaturan PPN", icon: "receipt", desc: "Konfigurasi tarif dan mode PPN (include/exclude/non)" },
       { path: "/backup-restore", label: "Backup & Restore", icon: "cloud_upload", desc: "Ekspor dan impor data cadangan database" },
@@ -111,24 +115,35 @@ const menuSections = [
   },
 ];
 
-export default function Sidebar({ collapsed, onToggle }) {
+export default function Sidebar({ collapsed, onToggle, currentUser, onLogout, loggingOut }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { addToast } = useToast();
+  const onKasirTab = location.pathname === "/transaksi";
   // Toko data untuk ditampilkan di header sidebar
   const [namaTokoDisplay, setNamaTokoDisplay] = useState("");
   // Section yang sedang terbuka (accordion)
-  const [expandedSections, setExpandedSections] = useState(["Kasir"]);
+  const [expandedSections, setExpandedSections] = useState(["Utama"]);
   const [allExpanded, setAllExpanded] = useState(false);
   const [search, setSearch] = useState("");
 
   const filteredSections = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return menuSections;
+    // Cari di label menu + desc + title/description PageShell tiap halaman.
     return menuSections
       .map((section) => ({
         ...section,
-        items: section.items.filter((item) => `${item.label} ${item.desc}`.toLowerCase().includes(query)),
+        items: section.items.filter((item) =>
+          pageSearchText(item.path, item.label, item.desc).includes(query),
+        ),
       }))
       .filter((section) => section.items.length > 0);
   }, [search]);
+
+  useEffect(() => {
+    if (search.trim()) setExpandedSections(filteredSections.map((section) => section.label));
+  }, [search, filteredSections]);
 
   const toggleAll = () => {
     if (collapsed) {
@@ -215,21 +230,122 @@ export default function Sidebar({ collapsed, onToggle }) {
             {(collapsed || expandedSections.includes(section.label)) && (
               <div className="sidebar-items">
                 {section.items.map((item) => (
-                  <NavLink
-                    key={item.path}
-                    to={item.path}
-                    className={({ isActive }) => `sidebar-item${isActive ? " active" : ""}`}
-                    title={item.label}
-                  >
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                    {!collapsed && <span className="sidebar-item-label">{item.label}</span>}
-                  </NavLink>
+                  <div key={item.path} className="sidebar-item-wrap">
+                    <NavLink
+                      to={item.path}
+                      className={({ isActive }) => `sidebar-item${isActive ? " active" : ""}`}
+                      title={pageSnippet(item.path, item.desc) || item.label}
+                    >
+                      <span className="material-symbols-outlined">{item.icon}</span>
+                      {!collapsed && (
+                        <span className="sidebar-item-text">
+                          <span className="sidebar-item-label">{item.label}</span>
+                          {search.trim() && (
+                            <span className="sidebar-item-snippet">
+                              {pageSnippet(item.path, item.desc)}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </NavLink>
+                    {!collapsed && item.path === "/transaksi" && onKasirTab && (
+                      <>
+                        <button
+                          type="button"
+                          className="sidebar-kasir-mode-btn"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigate("/transaksi");
+                            setKasirMode(true);
+                            addToast("Tekan Ctrl + Esc untuk keluar dari mode kasir", "info");
+                          }}
+                        >
+                          <span className="sidebar-kasir-mode-btn__tree" aria-hidden="true">└─</span>
+                          <span>Masuk Mode Kasir</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="sidebar-kasir-mode-btn"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigate("/riwayat");
+                          }}
+                        >
+                          <span className="sidebar-kasir-mode-btn__tree" aria-hidden="true">└─</span>
+                          <span>Riwayat Penjualan</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
           </div>
         ))}
       </nav>
+      
+      {/* Status User */}
+      {currentUser && (
+        <div className="sidebar-user-status" style={{
+          padding: collapsed ? "12px 0" : "14px",
+          borderTop: "1px solid var(--color-surface-border)",
+          display: "flex",
+          flexDirection: collapsed ? "column" : "row",
+          alignItems: collapsed ? "center" : "center",
+          justifyContent: collapsed ? "center" : "space-between",
+          background: "var(--color-surface-container-lowest)",
+          position: "sticky",
+          bottom: 0,
+          zIndex: 10
+        }}>
+          {collapsed ? (
+            <span className="material-symbols-outlined" title={currentUser.nama_lengkap || currentUser.username}>
+              account_circle
+            </span>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden", flex: 1 }}>
+              <span className="material-symbols-outlined" style={{ color: "var(--color-primary)", fontSize: "20px" }}>
+                account_circle
+              </span>
+              <span style={{ 
+                fontSize: "13px", 
+                fontWeight: "600",
+                color: "var(--color-text-primary)",
+                whiteSpace: "nowrap", 
+                overflow: "hidden", 
+                textOverflow: "ellipsis" 
+              }}>
+                {currentUser.nama_lengkap || currentUser.username}
+              </span>
+            </div>
+          )}
+          {!collapsed && (
+            <button 
+              type="button" 
+              onClick={onLogout} 
+              disabled={loggingOut} 
+              style={{
+                border: "none",
+                background: "none",
+                color: "var(--color-text-secondary)",
+                cursor: "pointer",
+                padding: "4px",
+                borderRadius: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+              title={loggingOut ? "Keluar..." : "Keluar"}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>
+                {loggingOut ? "hourglass_top" : "logout"}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

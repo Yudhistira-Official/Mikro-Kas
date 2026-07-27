@@ -1,22 +1,41 @@
-import { useEffect, useState } from "react";
+// ============================================================
+// NomorTransaksi.jsx — Format penomoran otomatis (PageKit).
+//
+// Commands: list_nomor_settings, update_nomor_setting, generate_nomor
+// ============================================================
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import SearchSelect from "../components/SearchSelect";
+import {
+  PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter,
+} from "../components/PageKit";
 
 const resetLabels = { none: "Tidak reset", monthly: "Setiap bulan", yearly: "Setiap tahun" };
 
 /**
- * Halaman pengaturan nomor transaksi.
- * Menampilkan format, counter, reset period, serta preview nomor berikutnya.
+ * Preview nomor dari prefix + digit_run + current_number (tanpa side-effect).
+ */
+function previewNomor(item) {
+  const dig = Math.max(1, Math.min(12, Number(item.digit_run) || 1));
+  const num = String(Number(item.current_number) || 1).padStart(dig, "0");
+  return `${item.prefix || ""}${num}`;
+}
+
+/**
+ * Halaman pengaturan nomor transaksi: format, counter, reset, generate.
  */
 export default function NomorTransaksi() {
   const { addToast } = useToast();
   const [settings, setSettings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [form, setForm] = useState({ prefix: "", digit_run: 4, reset_period: "none" });
   const [result, setResult] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await invoke("list_nomor_settings");
@@ -26,32 +45,55 @@ export default function NomorTransaksi() {
     } finally {
       setLoading(false);
     }
+  }, [addToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const { query, setQuery, filtered } = useSearchFilter(
+    settings,
+    (s) => `${s.tipe || ""} ${s.prefix || ""} ${s.reset_period || ""}`
+  );
+
+  /** Buka modal edit format nomor. */
+  const openEdit = (item) => {
+    setEditItem(item);
+    setForm({
+      prefix: item.prefix || "",
+      digit_run: item.digit_run ?? 4,
+      reset_period: item.reset_period || "none",
+    });
   };
 
-  useEffect(() => { load(); }, []);
-
-  const updateField = (id, field, value) => {
-    setSettings((prev) => prev.map((item) => item.id === id ? { ...item, [field]: value } : item));
-  };
-
-  const save = async (item) => {
-    const digitRun = Number(item.digit_run);
-    if (!item.prefix.trim()) return addToast("Prefix wajib diisi", "error");
+  /** Simpan format nomor via update_nomor_setting. */
+  const save = async (e) => {
+    e.preventDefault();
+    if (!editItem) return;
+    const digitRun = Number(form.digit_run);
+    if (!form.prefix.trim()) return addToast("Prefix wajib diisi", "error");
     if (!digitRun || digitRun < 1 || digitRun > 12) return addToast("Digit nomor harus 1-12", "error");
-    setSavingId(item.id);
+    setSaving(true);
     try {
       await invoke("update_nomor_setting", {
-        req: { tipe: item.tipe, prefix: item.prefix.trim(), digit_run: digitRun, reset_period: item.reset_period },
+        req: {
+          tipe: editItem.tipe,
+          prefix: form.prefix.trim(),
+          digit_run: digitRun,
+          reset_period: form.reset_period,
+        },
       });
-      addToast(`Format ${item.tipe} diperbarui`, "success");
+      addToast(`Format ${editItem.tipe} diperbarui`, "success");
+      setEditItem(null);
       load();
     } catch (err) {
       addToast(String(err), "error");
     } finally {
-      setSavingId(null);
+      setSaving(false);
     }
   };
 
+  /**
+   * Generate nomor berikutnya (side-effect: increment counter di DB).
+   */
   const generate = async (tipe) => {
     setGenerating(tipe);
     try {
@@ -66,86 +108,147 @@ export default function NomorTransaksi() {
     }
   };
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>;
+  const columns = [
+    {
+      key: "tipe",
+      label: "Tipe",
+      render: (item) => (
+        <div>
+          <b style={{ textTransform: "capitalize" }}>{String(item.tipe || "").replace(/_/g, " ")}</b>
+          <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+            Counter: {item.current_number}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "format",
+      label: "Format",
+      render: (item) => (
+        <code style={{ fontSize: 12 }}>
+          {item.prefix}
+          {"0".repeat(Math.max(0, Number(item.digit_run) || 0)).slice(0, 4) || "####"}
+        </code>
+      ),
+    },
+    {
+      key: "preview",
+      label: "Preview",
+      render: (item) => <b>{previewNomor(item)}</b>,
+    },
+    {
+      key: "reset",
+      label: "Reset",
+      render: (item) => (
+        <StatusBadge
+          label={resetLabels[item.reset_period] || item.reset_period}
+          tone={item.reset_period === "none" ? "neutral" : "primary"}
+        />
+      ),
+    },
+    {
+      key: "aksi",
+      label: "",
+      align: "right",
+      render: (item) => (
+        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ fontSize: 12, padding: "4px 10px", minHeight: 0 }}
+            onClick={() => generate(item.tipe)}
+            disabled={generating === item.tipe}
+          >
+            {generating === item.tipe ? "..." : "Generate"}
+          </button>
+          <button type="button" className="btn-icon" onClick={() => openEdit(item)} title="Edit">
+            <span className="material-symbols-outlined">edit</span>
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "var(--color-accent-gradient)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "22px", color: "#fff" }}>tag</span>
-          </div>
-          <div>
-            <h1 className="text-headline-md">Nomor Transaksi</h1>
-            <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>Kelola format penomoran otomatis</p>
-          </div>
-        </div>
-        <button className="btn-icon" onClick={load} title="Refresh" aria-label="Refresh"><span className="material-symbols-outlined">refresh</span></button>
-      </header>
-
-      <div style={{ background: "var(--color-primary-fixed)", borderRadius: "12px", padding: "12px 14px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
-        <span className="material-symbols-outlined" style={{ color: "var(--color-primary)", fontSize: "20px" }}>info</span>
-        <p style={{ fontSize: "12px", color: "var(--color-primary-container)", lineHeight: "1.5" }}>
-          Prefix dan jumlah digit menentukan format nomor. Reset bulanan/tahunan mengembalikan counter ke 1 pada periode baru.
-        </p>
-      </div>
+    <PageShell
+      eyebrow="PENGATURAN"
+      title="Nomor Transaksi"
+      description="Atur prefix, jumlah digit, dan periode reset counter untuk setiap tipe transaksi."
+      stats={[
+        { label: "Tipe nomor", value: settings.length, icon: "tag" },
+        {
+          label: "Reset bulanan",
+          value: settings.filter((s) => s.reset_period === "monthly").length,
+          icon: "calendar_month",
+        },
+      ]}
+    >
+      <InfoNote>
+        Prefix + digit menentukan format (contoh INV0001). Generate mengambil nomor berikutnya dan menaikkan counter.
+        Reset bulanan/tahunan mengembalikan counter ke 1 pada periode baru.
+      </InfoNote>
 
       {result && (
-        <section className="card" style={{ background: "linear-gradient(135deg, #7C3AED, #06B6D4)", color: "#fff", border: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>check_circle</span>
-            <span style={{ fontSize: "12px", opacity: 0.9 }}>Nomor berikutnya untuk {result.tipe}</span>
+        <div className="card" style={{ marginBottom: 12, background: "var(--color-primary-fixed)" }}>
+          <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+            Nomor terakhir di-generate ({result.tipe})
           </div>
-          <strong style={{ fontSize: "26px", letterSpacing: "0.04em" }}>{result.nomor}</strong>
-        </section>
+          <strong style={{ fontSize: 22, letterSpacing: "0.04em" }}>{result.nomor}</strong>
+        </div>
       )}
 
-      {settings.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "48px", color: "var(--color-text-secondary)", opacity: 0.4 }}>tag</span>
-          <p style={{ color: "var(--color-text-secondary)", marginTop: "10px" }}>Belum ada pengaturan nomor</p>
-        </div>
-      ) : settings.map((item) => (
-        <section className="card" key={item.id}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
-            <div>
-              <h2 className="text-headline-sm" style={{ textTransform: "capitalize" }}>{item.tipe.replace(/_/g, " ")}</h2>
-              <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "2px" }}>Counter saat ini: <b>{item.current_number}</b></p>
-            </div>
-            <span className="chip chip-blue">{resetLabels[item.reset_period] || item.reset_period}</span>
-          </div>
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari tipe / prefix..."
+        onRefresh={load}
+        loading={loading}
+        isEmpty={!loading && filtered.length === 0}
+        emptyIcon="tag"
+        emptyTitle="Belum ada pengaturan nomor"
+        emptyHint="Data nomor diisi otomatis saat migrasi database."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(s) => s.id} />
+      </DataPanel>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: "10px", marginBottom: "12px" }}>
-            <label>
-              <span className="input-label">Prefix *</span>
-              <input className="input-field" value={item.prefix} onChange={(e) => updateField(item.id, "prefix", e.target.value)} placeholder="Contoh: INV" />
-            </label>
-            <label>
-              <span className="input-label">Jumlah Digit *</span>
-              <input className="input-field" type="number" min="1" max="12" value={item.digit_run} onChange={(e) => updateField(item.id, "digit_run", e.target.value)} />
-            </label>
-          </div>
-          <label style={{ display: "block", marginBottom: "14px" }}>
-            <span className="input-label">Reset Counter</span>
-            <select className="input-field" value={item.reset_period} onChange={(e) => updateField(item.id, "reset_period", e.target.value)}>
-              <option value="none">Tidak reset</option>
-              <option value="monthly">Setiap bulan</option>
-              <option value="yearly">Setiap tahun</option>
-            </select>
-          </label>
-
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button className="btn-secondary" style={{ flex: 1, fontSize: "13px", padding: "8px 10px" }} onClick={() => generate(item.tipe)} disabled={generating === item.tipe}>
-              {generating === item.tipe ? <span className="spinner" style={{ width: "15px", height: "15px" }} /> : <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>play_arrow</span>}
-              Generate
-            </button>
-            <button className="btn-primary" style={{ flex: 1, fontSize: "13px", padding: "8px 10px" }} onClick={() => save(item)} disabled={savingId === item.id}>
-              {savingId === item.id ? <span className="spinner" style={{ width: "15px", height: "15px" }} /> : <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>save</span>}
-              Simpan
-            </button>
-          </div>
-        </section>
-      ))}
-    </div>
+      {editItem && (
+        <FormModal
+          title={`Edit: ${String(editItem.tipe).replace(/_/g, " ")}`}
+          description="Ubah prefix, digit, dan periode reset. Counter saat ini tidak diubah."
+          onClose={() => setEditItem(null)}
+          onSubmit={save}
+          submitLabel="Simpan Format"
+          submitting={saving}
+        >
+          <label className="input-label">Prefix *</label>
+          <input
+            className="input-field"
+            value={form.prefix}
+            onChange={(e) => setForm((p) => ({ ...p, prefix: e.target.value }))}
+            placeholder="Contoh: INV"
+            autoFocus
+          />
+          <label className="input-label">Jumlah Digit * (1–12)</label>
+          <input
+            className="input-field"
+            type="number"
+            min={1}
+            max={12}
+            value={form.digit_run}
+            onChange={(e) => setForm((p) => ({ ...p, digit_run: e.target.value }))}
+          />
+          <label className="input-label">Reset Counter</label>
+          <SearchSelect
+            value={form.reset_period}
+            onChange={(value) => setForm((p) => ({ ...p, reset_period: value }))}
+            options={[{ value: "none", label: "Tidak reset" }, { value: "monthly", label: "Setiap bulan" }, { value: "yearly", label: "Setiap tahun" }]}
+            placeholder="Pilih periode"
+          />
+          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: 8 }}>
+            Preview: <b>{previewNomor({ ...editItem, ...form, digit_run: Number(form.digit_run) })}</b>
+          </p>
+        </FormModal>
+      )}
+    </PageShell>
   );
 }

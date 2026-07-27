@@ -1,7 +1,7 @@
 // QrisScanner — upload gambar QRIS, decode pakai jsQR (no camera).
 // Kamera tidak diaktifkan — Tauri WebView tidak konsisten untuk getUserMedia.
 // Aktivitas upload dicatat ke log Rust tanpa merekam payload QRIS/gambar.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "../utils/ipc";
 import decodeQrImage from "../utils/decodeQrImage";
 
@@ -9,6 +9,14 @@ export default function QrisScanner({ onScanned, onClose }) {
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [uploaded, setUploaded] = useState(null);
+
+  // Escape menutup scanner tanpa mengganggu pemindaian yang sedang berjalan.
+  useEffect(() => {
+    /** Handles Escape keydown to close the scanner modal. */
+    const handler = (e) => { if (e.key === "Escape" && !scanning) { e.preventDefault(); onClose(); } };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose, scanning]);
 
   // Handle upload menggunakan native dialog picker agar kompatibel dengan Android content:// URI
   // dan mem-bypass pembatasan WebView Samsung sandbox (NotReadableError).
@@ -57,7 +65,11 @@ export default function QrisScanner({ onScanned, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ textAlign: "center", position: "relative" }}>
+        {/* Tombol close X di kanan atas, disabled saat pemindaian berlangsung */}
+        <button type="button" className="btn-icon" onClick={onClose} disabled={scanning} aria-label="Tutup" style={{ position: "absolute", top: 12, right: 12 }}>
+          <span className="material-symbols-outlined">close</span>
+        </button>
         <h3 className="text-headline-md" style={{ marginBottom: "0.5rem" }}>
           Unggah QRIS Statis
         </h3>

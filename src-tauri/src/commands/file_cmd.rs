@@ -99,7 +99,10 @@ pub fn backup_database_to(
     _state: State<DbState>,
     target_path: String,
 ) -> Result<String, String> {
-    crate::logger::log(&format!("BACKUP: backup_database_to dipanggil; target_len={}", target_path.len()));
+    crate::logger::log(&format!(
+        "BACKUP: backup_database_to dipanggil; target_len={}",
+        target_path.len()
+    ));
     let mut target = std::path::PathBuf::from(target_path);
     if target.extension().and_then(|e| e.to_str()) != Some("db") {
         target.set_extension("db");
@@ -115,11 +118,17 @@ pub fn backup_database_to(
 /// Ekspor database SQLite sebagai base64 agar frontend bisa menulis ke hasil
 /// native save picker Android tanpa bergantung pada path filesystem.
 #[tauri::command]
-pub fn export_database_base64(app: tauri::AppHandle, _state: State<DbState>) -> Result<String, String> {
+pub fn export_database_base64(
+    app: tauri::AppHandle,
+    _state: State<DbState>,
+) -> Result<String, String> {
     crate::logger::log("BACKUP: export_database_base64 dipanggil");
     let db_path = database_path(&app)?;
     let bytes = std::fs::read(&db_path).map_err(|e| format!("Gagal baca DB untuk backup: {e}"))?;
-    crate::logger::log(&format!("BACKUP: export_database_base64 sukses; bytes={}", bytes.len()));
+    crate::logger::log(&format!(
+        "BACKUP: export_database_base64 sukses; bytes={}",
+        bytes.len()
+    ));
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
@@ -131,7 +140,10 @@ pub fn restore_database_base64(
     _state: State<DbState>,
     db_base64: String,
 ) -> Result<(), String> {
-    crate::logger::log(&format!("BACKUP: restore_database_base64 dipanggil; base64_len={}", db_base64.len()));
+    crate::logger::log(&format!(
+        "BACKUP: restore_database_base64 dipanggil; base64_len={}",
+        db_base64.len()
+    ));
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(db_base64)
         .map_err(|e| format!("File backup tidak valid: {e}"))?;

@@ -11,6 +11,7 @@ pub struct PesananCustomer {
     pub customer_id: Option<i64>,
     pub customer_nama: Option<String>,
     pub nama_pemesan: String,
+    pub no_hp: Option<String>,
     pub total: i64,
     pub dp: i64,
     pub sisa: i64,
@@ -25,6 +26,7 @@ pub struct PesananCustomer {
 pub struct PesananCustomerInput {
     pub customer_id: Option<i64>,
     pub nama_pemesan: String,
+    pub no_hp: Option<String>,
     pub total: i64,
     pub dp: Option<i64>,
     pub catatan: Option<String>,

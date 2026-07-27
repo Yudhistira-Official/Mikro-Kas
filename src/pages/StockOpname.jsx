@@ -1,248 +1,361 @@
-// ============================================================
-// StockOpname.jsx — Stock opname / audit stok massal untuk seluruh produk.
-//
-// Flow:
-//   1. Load semua produk aktif.
-//   2. User klik tombol "Fisik" → muncul popup modal untuk input stok fisik.
-//   3. Setelah input, simpan perubahan yang ada selisihnya.
-// ============================================================
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
-
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+import {
+  PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge,
+  useSearchFilter,
+} from "../components/PageKit";
 
 export default function StockOpname() {
   const { addToast } = useToast();
-  const [produkList, setProdukList] = useState([]);
-  const [counts, setCounts] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("baru");
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [query, setQuery] = useState("");
-  const [result, setResult] = useState(null);
-  const [modalItem, setModalItem] = useState(null);   // popup untuk edit stok fisik
-  const [modalValue, setModalValue] = useState("");
-  const inputRef = useRef(null);
 
-  const load = useCallback(async () => {
+  /* ── Tab Baru ── */
+  const [form, setForm] = useState({ namaToko: "", tanggal: "", petugas: "", penanggungJawab: "", catatan: "" });
+  const [produkList, setProdukList] = useState([]);
+  const [fisikMap, setFisikMap] = useState({});
+
+  const loadAwal = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await invoke("list_produk", { onlyActive: true });
-      setProdukList(data);
-    } catch (e) { addToast(`Gagal memuat produk: ${e}`, "error"); }
+      const [toko, produk] = await Promise.all([
+        invoke("get_toko"),
+        invoke("list_produk", { onlyActive: true }),
+      ]);
+      const today = new Date().toISOString().slice(0, 10);
+      setForm({
+        namaToko: toko?.nama_toko || "",
+        tanggal: today,
+        petugas: "",
+        penanggungJawab: "",
+        catatan: "",
+      });
+      setProdukList(produk);
+    } catch (e) { addToast(`Gagal muat data: ${e}`, "error"); }
     finally { setLoading(false); }
   }, [addToast]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadAwal(); }, [loadAwal]);
 
-  const filtered = produkList.filter((p) =>
-    !query.trim() || p.nama.toLowerCase().includes(query.toLowerCase()) ||
-    (p.sku || "").toLowerCase().includes(query.toLowerCase())
-  );
+  const updateFisik = (produkId, fisik) => {
+    setFisikMap((prev) => {
+      const curr = prev[produkId] || { fisik: null, keterangan: "" };
+      return { ...prev, [produkId]: { ...curr, fisik } };
+    });
+  };
+  const updateKeterangan = (produkId, keterangan) => {
+    setFisikMap((prev) => {
+      const curr = prev[produkId] || { fisik: null, keterangan: "" };
+      return { ...prev, [produkId]: { ...curr, keterangan } };
+    });
+  };
 
-  // Hitung ringkasan dari SEMUA produk, bukan hanya filtered
   const allSelisihList = produkList
-    .filter((p) => counts[p.id] !== undefined && counts[p.id] !== "")
+    .filter((p) => fisikMap[p.id]?.fisik !== null && fisikMap[p.id]?.fisik !== undefined && fisikMap[p.id]?.fisik !== "")
     .map((p) => {
-      const fisik = parseInt(counts[p.id], 10);
-      return { id: p.id, nama: p.nama, sistem: p.stok, fisik, selisih: Number.isFinite(fisik) ? fisik - p.stok : 0 };
+      const fisik = parseInt(fisikMap[p.id].fisik, 10);
+      return { id: p.id, nama: p.nama, sku: p.sku, satuan: p.satuan, stok: p.stok, fisik, selisih: Number.isFinite(fisik) ? fisik - p.stok : 0 };
     });
   const selisihMasuk = allSelisihList.filter((x) => x.selisih > 0).reduce((s, x) => s + x.selisih, 0);
   const selisihKeluar = allSelisihList.filter((x) => x.selisih < 0).reduce((s, x) => s + Math.abs(x.selisih), 0);
   const berubah = allSelisihList.filter((x) => x.selisih !== 0).length;
-
-  // Open modal
-  const openModal = (p) => {
-    const current = counts[p.id] !== undefined ? counts[p.id] : "";
-    setModalItem(p);
-    setModalValue(current);
-    setTimeout(() => {
-      if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
-    }, 100);
-  };
-
-  const saveModal = () => {
-    if (modalValue === "") {
-      const newCounts = { ...counts };
-      delete newCounts[modalItem.id];
-      setCounts(newCounts);
-    } else {
-      setCounts((prev) => ({ ...prev, [modalItem.id]: modalValue }));
-    }
-    setModalItem(null);
-  };
-
-  const log = useCallback((msg) => {
-    try { invoke("write_log", { msg: `OPNAME: ${msg}` }).catch(() => {}); } catch {}
-  }, []);
+  const totalInput = allSelisihList.length;
 
   const simpanOpname = async () => {
-    const items = allSelisihList.filter((x) => x.selisih !== 0);
-    if (items.length === 0) return addToast("Tidak ada perubahan stok untuk disimpan", "info");
+    if (!form.namaToko.trim()) return addToast("Nama toko wajib diisi", "error");
+    if (!form.tanggal.trim()) return addToast("Tanggal wajib diisi", "error");
+    if (!form.petugas.trim()) return addToast("Petugas wajib diisi", "error");
+    if (totalInput === 0) return addToast("Input stok fisik minimal satu produk", "info");
+
     setSaving(true);
     try {
-      let sukses = 0, gagal = 0;
-      for (const item of items) {
-        try {
-          const fisik = Number.isFinite(item.fisik) ? item.fisik : 0;
-          if (fisik < 0) throw new Error("Stok baru tidak boleh negatif");
-          await invoke("adjust_stock", { input: { produkId: item.id, stokBaru: fisik, alasan: "Stock opname" } });
-          sukses++;
-          log(`sukses: ${item.nama} → ${fisik}`);
-        } catch (e) {
-          gagal++;
-          log(`gagal ${item.nama}: ${String(e?.message || e).slice(0, 100)}`);
-        }
-      }
-      setResult({ sukses, gagal, total: items.length });
-      addToast(`Stock opname selesai: ${sukses} disimpan, ${gagal} gagal`, sukses > 0 ? "success" : "error");
-      const updated = await invoke("list_produk", { onlyActive: true });
-      setProdukList(updated);
-      setCounts({});
-    } catch (e) {
-      addToast(`Gagal menjalankan opname: ${e}`, "error");
-    } finally {
-      setSaving(false);
-    }
+      const items = allSelisihList.map((x) => ({
+        produkId: x.id,
+        kodeBarang: x.sku || "",
+        namaBarang: x.nama,
+        satuan: x.satuan || "",
+        stokSistem: x.stok,
+        stokFisik: x.fisik,
+        keterangan: fisikMap[x.id]?.keterangan || "",
+      }));
+
+      await invoke("create_stock_opname", {
+        input: {
+          namaToko: form.namaToko,
+          tanggal: form.tanggal,
+          petugas: form.petugas,
+          penanggungJawab: form.penanggungJawab,
+          catatan: form.catatan,
+          items,
+        },
+      });
+
+      addToast("Opname berhasil disimpan", "success");
+      setFisikMap({});
+      const refreshed = await invoke("list_produk", { onlyActive: true });
+      setProdukList(refreshed);
+    } catch (e) { addToast(`Gagal simpan: ${e}`, "error"); }
+    finally { setSaving(false); }
   };
 
-  const clearResult = () => setResult(null);
+  const { query, setQuery, filtered } = useSearchFilter(
+    produkList,
+    (p) => `${p.nama || ""} ${p.sku || ""}`
+  );
+
+  const columnsBaru = [
+    { key: "no", label: "No", width: 40, align: "center",
+      render: (_, idx) => idx + 1,
+    },
+    { key: "kode", label: "Kode Barang", render: (p) => <span className="text-label-md">{p.sku || "—"}</span> },
+    { key: "nama", label: "Nama Barang", render: (p) => <b>{p.nama}</b> },
+    { key: "satuan", label: "Satuan", render: (p) => p.satuan || "—", align: "center" },
+    { key: "sistem", label: "Stok Sistem", align: "center", render: (p) => p.stok },
+    { key: "fisik", label: "Stok Fisik", align: "center",
+      render: (p) => {
+        const val = fisikMap[p.id]?.fisik !== undefined ? fisikMap[p.id].fisik : "";
+        return (
+          <input
+            className="input-field"
+            style={{ width: 72, textAlign: "center" }}
+            type="number"
+            inputMode="numeric"
+            value={val}
+            onChange={(e) => updateFisik(p.id, e.target.value.replace(/\D/g, ""))}
+            placeholder="0"
+          />
+        );
+      },
+    },
+    { key: "selisih", label: "Selisih", align: "center",
+      render: (p) => {
+        const val = fisikMap[p.id]?.fisik;
+        if (val === undefined || val === null || val === "") return "—";
+        const fisik = parseInt(val, 10);
+        if (!Number.isFinite(fisik)) return "—";
+        const selisih = fisik - p.stok;
+        if (selisih === 0) return <StatusBadge label="0" tone="neutral" />;
+        return <StatusBadge label={`${selisih > 0 ? "+" : ""}${selisih}`} tone={selisih > 0 ? "success" : "danger"} />;
+      },
+    },
+    { key: "keterangan", label: "Keterangan",
+      render: (p) => (
+        <input
+          className="input-field"
+          style={{ width: 140 }}
+          value={fisikMap[p.id]?.keterangan || ""}
+          onChange={(e) => updateKeterangan(p.id, e.target.value)}
+          placeholder="Rusak/hilang..."
+        />
+      ),
+    },
+  ];
+
+  /* ── Tab Riwayat ── */
+  const [riwayat, setRiwayat] = useState([]);
+  const [detailModal, setDetailModal] = useState(null);
+  const [detailItems, setDetailItems] = useState([]);
+
+  const loadRiwayat = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await invoke("list_stock_opname");
+      setRiwayat(data);
+    } catch (e) { addToast(`Gagal muat riwayat: ${e}`, "error"); }
+    finally { setLoading(false); }
+  }, [addToast]);
+
+  useEffect(() => { if (tab === "riwayat") void loadRiwayat(); }, [tab, loadRiwayat]);
+
+  const openDetail = async (id) => {
+    try {
+      const full = await invoke("get_stock_opname", { id });
+      setDetailModal(full.header);
+      setDetailItems(full.items);
+    } catch (e) { addToast(`Gagal muat detail: ${e}`, "error"); }
+  };
+
+  const exportDocx = async (id, kode) => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({
+        defaultPath: `${kode}.docx`,
+        filters: [{ name: "Word Document", extensions: ["docx"] }],
+      });
+      if (!path) return;
+      await invoke("export_stock_opname_docx", { opnameId: id, savePath: path });
+      addToast("DOCX berhasil disimpan", "success");
+    } catch (e) { addToast(`Gagal export: ${e}`, "error"); }
+  };
+
+  const columnsRiwayat = [
+    { key: "kode", label: "Kode", render: (r) => <b>{r.kode}</b> },
+    { key: "tanggal", label: "Tanggal" },
+    { key: "nama_toko", label: "Nama Toko" },
+    { key: "petugas", label: "Petugas" },
+    { key: "jumlah", label: "Item", align: "center", render: (r) => r.jumlah_item },
+    { key: "kurang", label: "Selisih (-)", align: "center",
+      render: (r) => r.total_selisih_kurang !== 0 ? <StatusBadge label={String(r.total_selisih_kurang)} tone="danger" /> : "—",
+    },
+    { key: "lebih", label: "Selisih (+)", align: "center",
+      render: (r) => r.total_selisih_lebih !== 0 ? <StatusBadge label={`+${r.total_selisih_lebih}`} tone="success" /> : "—",
+    },
+    { key: "aksi", label: "Aksi",
+      render: (r) => (
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" className="btn-secondary" onClick={() => openDetail(r.id)}>
+            Detail
+          </button>
+          <button type="button" className="btn-primary" onClick={() => exportDocx(r.id, r.kode)}>
+            Export DOCX
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <span className="text-headline-md">Stock Opname</span>
-
-      {/* Summary cards — Total Produk dan Berubah berdampingan */}
-      <div style={{ display: "flex", gap: "0.75rem" }}>
-        <div className="card" style={{ flex: 1, textAlign: "center", padding: "1rem", background: "var(--color-primary-container)", borderRadius: "12px" }}>
-          <p className="text-label-md" style={{ color: "var(--color-on-primary)", opacity: 0.85 }}>Total Produk</p>
-          <p className="text-headline-md" style={{ color: "var(--color-on-primary)", marginTop: "4px" }}>{filtered.length}</p>
-          <p className="text-label-md" style={{ color: "var(--color-on-primary)", opacity: 0.6, fontSize: "11px" }}>yang diperiksa</p>
-        </div>
-        <div className="card" style={{ flex: 1, textAlign: "center", padding: "1rem", background: "var(--color-warning-amber)", borderRadius: "12px", color: "white" }}>
-          <p className="text-label-md" style={{ opacity: 0.85 }}>Berubah</p>
-          <p className="text-headline-md" style={{ marginTop: "4px" }}>{berubah}</p>
-          <p className="text-label-md" style={{ opacity: 0.6, fontSize: "11px" }}>produk disesuaikan</p>
-        </div>
+    <PageShell
+      eyebrow="STOK"
+      title="Stock Opname"
+      description="Buat opname stok fisik baru atau lihat riwayat opname yang sudah tersimpan."
+    >
+      <div className="tab-bar" style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid var(--color-border)" }}>
+        {["baru", "riwayat"].map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            style={{
+              flex: 1, padding: "10px 16px", cursor: "pointer",
+              background: tab === t ? "var(--color-bg-active)" : "transparent",
+              border: "none", borderBottom: tab === t ? "2px solid var(--color-primary)" : "2px solid transparent",
+              fontWeight: tab === t ? 600 : 400, marginBottom: -2,
+              color: tab === t ? "var(--color-primary)" : "var(--color-text-secondary)",
+            }}
+          >
+            {t === "baru" ? "Opname Baru" : "Riwayat"}
+          </button>
+        ))}
       </div>
 
-      {/* Ringkasan selisih */}
-      {(selisihMasuk > 0 || selisihKeluar > 0) && (
-        <div className="card" style={{ display: "flex", padding: "0.75rem", gap: "0.5rem", background: "var(--color-surface-container-low)" }}>
-          <div style={{ textAlign: "center", flex: 1 }}>
-            <p className="text-label-md" style={{ fontSize: "10px", color: "var(--color-success-green)" }}>Stok Masuk</p>
-            <p className="text-body-md" style={{ fontWeight: 700, color: "var(--color-success-green)" }}>+{selisihMasuk}</p>
+      {tab === "baru" && (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+            <label className="input-label" style={{ flex: "1 1 200px" }}>
+              Nama Toko / Cabang
+              <input className="input-field" value={form.namaToko} onChange={(e) => setForm((f) => ({ ...f, namaToko: e.target.value }))} />
+            </label>
+            <label className="input-label" style={{ flex: "1 1 150px" }}>
+              Hari / Tanggal
+              <input className="input-field" type="date" value={form.tanggal} onChange={(e) => setForm((f) => ({ ...f, tanggal: e.target.value }))} />
+            </label>
+            <label className="input-label" style={{ flex: "1 1 180px" }}>
+              Nama Petugas / Kasir
+              <input className="input-field" value={form.petugas} onChange={(e) => setForm((f) => ({ ...f, petugas: e.target.value }))} placeholder="Nama pemeriksa" />
+            </label>
+            <label className="input-label" style={{ flex: "1 1 180px" }}>
+              Penanggung Jawab
+              <input className="input-field" value={form.penanggungJawab} onChange={(e) => setForm((f) => ({ ...f, penanggungJawab: e.target.value }))} placeholder="Nama kepala toko" />
+            </label>
+            <label className="input-label" style={{ flex: "1 1 100%" }}>
+              Catatan
+              <input className="input-field" value={form.catatan} onChange={(e) => setForm((f) => ({ ...f, catatan: e.target.value }))} placeholder="Opsional" />
+            </label>
           </div>
-          <div style={{ width: "1px", background: "var(--color-surface-border)" }} />
-          <div style={{ textAlign: "center", flex: 1 }}>
-            <p className="text-label-md" style={{ fontSize: "10px", color: "var(--color-expense-red)" }}>Stok Keluar</p>
-            <p className="text-body-md" style={{ fontWeight: 700, color: "var(--color-expense-red)" }}>-{selisihKeluar}</p>
-          </div>
-        </div>
-      )}
 
-      {/* Search bar */}
-      <input className="input-field" placeholder="Cari produk atau SKU..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          <InfoNote>
+            Input stok fisik per produk. Selisih dihitung otomatis (Fisik − Sistem). Hanya baris dengan selisih ≠ 0 yang menyesuaikan stok.
+          </InfoNote>
 
-      {/* Result summary after save */}
-      {result && (
-        <div className="card" style={{ padding: "1rem", background: "var(--color-surface-container-low)", border: "1px solid var(--color-success-green)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <p className="text-headline-sm" style={{ color: "var(--color-success-green)" }}>
-              Opname selesai: {result.sukses} disimpan, {result.gagal} gagal
-            </p>
-            <button type="button" className="btn-icon" onClick={clearResult}>
-              <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>close</span>
+          <DataPanel
+            searchValue={query}
+            onSearch={setQuery}
+            searchPlaceholder="Cari kode/nama barang..."
+            loading={loading}
+            isEmpty={!loading && filtered.length === 0}
+            emptyIcon="inventory"
+            emptyTitle="Tidak ada produk"
+            emptyHint="Aktifkan produk terlebih dulu."
+          >
+            <DataTable columns={columnsBaru} rows={filtered} rowKey={(p) => p.id} />
+          </DataPanel>
+
+          <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className="btn-primary" onClick={simpanOpname} disabled={saving || totalInput === 0}>
+              {saving ? "Menyimpan..." : `Simpan Opname (${totalInput} item)`}
             </button>
+            <span className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+              {berubah > 0 ? `${berubah} item berubah · +${selisihMasuk} / -${selisihKeluar}` : "Belum ada perubahan"}
+            </span>
           </div>
-        </div>
+        </>
       )}
 
-      {/* Product list */}
-      {loading ? (
-        <div className="loading-page"><div className="spinner" /></div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state">
-          <span className="material-symbols-outlined">inventory</span>
-          <p className="text-body-md">{query ? "Tidak ada produk cocok pencarian" : "Belum ada produk"}</p>
-        </div>
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          {filtered.map((p) => {
-            const currentVal = counts[p.id] !== undefined ? counts[p.id] : "";
-            const fisik = parseInt(currentVal, 10);
-            const selisih = currentVal !== "" ? (Number.isFinite(fisik) ? fisik - p.stok : 0) : 0;
-            const hasChange = currentVal !== "" && selisih !== 0;
-            return (
-              <div key={p.id} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "0.75rem 1rem", borderBottom: "1px solid var(--color-surface-border)",
-                background: hasChange ? (selisih > 0 ? "rgba(16,185,129,0.05)" : "rgba(239,68,68,0.05)") : "transparent",
-              }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p className="text-headline-sm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.nama}</p>
-                  <p className="text-label-md" style={{ color: "var(--color-text-secondary)", fontSize: "11px" }}>
-                    Stok sistem: {p.stok} {p.satuan}
-                    {p.sku ? ` · SKU: ${p.sku}` : ""}
-                  </p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-                  {hasChange && (
-                    <span style={{
-                      fontSize: "11px", fontWeight: 700, padding: "2px 6px", borderRadius: "999px",
-                      color: selisih > 0 ? "var(--color-success-green)" : "var(--color-expense-red)",
-                      background: selisih > 0 ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
-                    }}>
-                      {selisih > 0 ? "+" : ""}{selisih}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => openModal(p)}
-                    style={{
-                      padding: "8px 16px", borderRadius: "8px", border: "1px solid var(--color-surface-border)",
-                      background: hasChange ? "var(--color-primary-container)" : "var(--color-surface)",
-                      color: hasChange ? "white" : "var(--color-text-secondary)",
-                      fontSize: "13px", fontWeight: 600, cursor: "pointer", textAlign: "center", minWidth: "80px",
-                    }}
-                  >
-                    {currentVal !== "" ? currentVal : "Fisik"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {tab === "riwayat" && (
+        <DataPanel
+          onRefresh={loadRiwayat}
+          loading={loading}
+          isEmpty={!loading && riwayat.length === 0}
+          emptyIcon="history"
+          emptyTitle="Belum ada opname"
+          emptyHint="Buat opname baru di tab Opname Baru."
+        >
+          <DataTable columns={columnsRiwayat} rows={riwayat} rowKey={(r) => r.id} />
+        </DataPanel>
       )}
 
-      {/* Simpan button */}
-      <button className="btn-primary" onClick={simpanOpname} disabled={saving || berubah === 0} style={{ width: "100%", padding: "14px" }}>
-        {saving ? <span className="spinner" style={{ width: "16px", height: "16px" }} /> : `Simpan Opname (${berubah} perubahan)`}
-      </button>
-
-      {/* Popup modal untuk input stok fisik */}
-      {modalItem && (
-        <div className="modal-overlay" onClick={() => setModalItem(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "340px" }}>
-            <h3 className="text-headline-md" style={{ marginBottom: "0.25rem" }}>Edit Stok Fisik</h3>
-            <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
-              {modalItem.nama}
-              <br />
-              <span style={{ fontSize: "12px" }}>Stok sistem: {modalItem.stok} {modalItem.satuan} · SKU: {modalItem.sku || "-"}</span>
-            </p>
-            <label className="input-label">Stok Fisik</label>
-            <input ref={inputRef} className="input-field" type="number" inputMode="numeric"
-              value={modalValue} onChange={(e) => setModalValue(e.target.value.replace(/\D/g, ""))}
-              style={{ width: "100%", marginBottom: "1rem" }}
-              onKeyDown={(e) => { if (e.key === "Enter") saveModal(); }}
-            />
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setModalItem(null)}>Batal</button>
-              <button className="btn-primary" style={{ flex: 1 }} onClick={saveModal}>Simpan</button>
-            </div>
+      {detailModal && (
+        <FormModal
+          title={`Detail Opname: ${detailModal.kode}`}
+          description={`${detailModal.nama_toko} · ${detailModal.tanggal} · ${detailModal.petugas}`}
+          onClose={() => { setDetailModal(null); setDetailItems([]); }}
+          submitLabel="Tutup"
+          onSubmit={() => { setDetailModal(null); setDetailItems([]); }}
+        >
+          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            <table className="data-table" style={{ width: "100%", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>Kode</th>
+                  <th>Nama</th>
+                  <th>Sat</th>
+                  <th>Sistem</th>
+                  <th>Fisik</th>
+                  <th>Selisih</th>
+                  <th>Ket</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailItems.map((item, idx) => (
+                  <tr key={item.id}>
+                    <td>{idx + 1}</td>
+                    <td>{item.kode_barang}</td>
+                    <td><b>{item.nama_barang}</b></td>
+                    <td className="text-label-md">{item.satuan}</td>
+                    <td style={{ textAlign: "center" }}>{item.stok_sistem}</td>
+                    <td style={{ textAlign: "center" }}>{item.stok_fisik}</td>
+                    <td style={{ textAlign: "center" }}>
+                      {item.selisih !== 0 ? (
+                        <StatusBadge label={String(item.selisih)} tone={item.selisih > 0 ? "success" : "danger"} />
+                      ) : "0"}
+                    </td>
+                    <td className="text-label-md">{item.keterangan}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {detailModal.catatan && (
+              <p className="text-label-md" style={{ marginTop: 8, color: "var(--color-text-secondary)" }}>
+                Catatan: {detailModal.catatan}
+              </p>
+            )}
           </div>
-        </div>
+        </FormModal>
       )}
-    </div>
+    </PageShell>
   );
 }

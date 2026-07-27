@@ -62,10 +62,14 @@ pub fn get_laporan_pelanggan(state: State<DbState>) -> Result<Vec<LaporanPelangg
 
     // 2. Ambil semua transaksi penjualan yang memiliki catatan
     let mut stmt_tx = conn
-        .prepare("SELECT total, catatan FROM transaksi WHERE tipe='penjualan' AND catatan IS NOT NULL")
+        .prepare(
+            "SELECT total, catatan FROM transaksi WHERE tipe='penjualan' AND catatan IS NOT NULL",
+        )
         .map_err(|e| e.to_string())?;
     let tx_rows = stmt_tx
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
 
     let mut tx_data = Vec::new();
@@ -244,14 +248,24 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 /// Import customer massal dari CSV.
 /// Format: nama, telepon, alamat, deskripsi_tambahan
 #[tauri::command]
-pub fn import_customer_csv(state: State<DbState>, csv_text: String) -> Result<ImportCustomerResult, String> {
+pub fn import_customer_csv(
+    state: State<DbState>,
+    csv_text: String,
+) -> Result<ImportCustomerResult, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut result = ImportCustomerResult { dibuat: 0, diupdate: 0, dilewati: 0, errors: Vec::new() };
+    let mut result = ImportCustomerResult {
+        dibuat: 0,
+        diupdate: 0,
+        dilewati: 0,
+        errors: Vec::new(),
+    };
 
     for (idx, raw_line) in csv_text.lines().enumerate() {
         let line_no = idx + 1;
         let line = raw_line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let cols = parse_csv_line(line);
         // Header spreadsheet dilewati otomatis.
@@ -261,20 +275,41 @@ pub fn import_customer_csv(state: State<DbState>, csv_text: String) -> Result<Im
 
         if cols.is_empty() || cols[0].trim().is_empty() {
             result.dilewati += 1;
-            result.errors.push(format!("Baris {line_no}: nama wajib diisi"));
+            result
+                .errors
+                .push(format!("Baris {line_no}: nama wajib diisi"));
             continue;
         }
 
         let nama = cols[0].trim().to_string();
-        let telepon = cols.get(1).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        let alamat = cols.get(2).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        let deskripsi = cols.get(3).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let telepon = cols
+            .get(1)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let alamat = cols
+            .get(2)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let deskripsi = cols
+            .get(3)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
 
         // ponytail: matching telepon/nama cukup untuk import spreadsheet UMKM; tambah customer_code jika multi-cabang perlu dedupe kuat.
         let existing_id: Option<i64> = if let Some(ref telp) = telepon {
-            conn.query_row("SELECT id FROM customer WHERE telepon = ?1 LIMIT 1", params![telp], |row| row.get(0)).ok()
+            conn.query_row(
+                "SELECT id FROM customer WHERE telepon = ?1 LIMIT 1",
+                params![telp],
+                |row| row.get(0),
+            )
+            .ok()
         } else {
-            conn.query_row("SELECT id FROM customer WHERE lower(nama) = lower(?1) LIMIT 1", params![nama], |row| row.get(0)).ok()
+            conn.query_row(
+                "SELECT id FROM customer WHERE lower(nama) = lower(?1) LIMIT 1",
+                params![nama],
+                |row| row.get(0),
+            )
+            .ok()
         };
 
         if let Some(id) = existing_id {

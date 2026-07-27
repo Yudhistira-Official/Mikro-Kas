@@ -10,8 +10,17 @@
 import { useEffect, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
-
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+import DateField from "../components/DateField";
+import SearchSelect from "../components/SearchSelect";
+import { formatDateId } from "../utils/dateFormat";
+import {
+  PageShell,
+  DataPanel,
+  DataTable,
+  InfoNote,
+  StatusBadge,
+  rupiah,
+} from "../components/PageKit";
 const today = () => new Date().toISOString().slice(0, 10);
 
 const shareCsv = async (csv, fileName) => {
@@ -183,7 +192,7 @@ export default function Laporan() {
     if (!barisProduk.length) return addToast("Tidak ada data untuk diekspor", "error");
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["Nama Produk", "Qty Terjual", "Total Modal", "Total Penjualan", "Laba Kotor", "Margin (%)"],
+      ["Nama Produk", "Jumlah Terjual", "Total Modal", "Total Penjualan", "Laba Kotor", "Margin (%)"],
       ...barisProduk.map((row) => {
         const laba = row.total_harga - row.total_modal;
         const persen = row.total_harga > 0 ? ((laba / row.total_harga) * 100).toFixed(1) + "%" : "0%";
@@ -199,7 +208,7 @@ export default function Laporan() {
     if (!barisPembelian.length) return addToast("Tidak ada data pembelian untuk diekspor", "error");
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     const rows = [
-      ["Tanggal", "ID Transaksi", "Supplier", "Produk", "Qty", "Harga Satuan", "Subtotal", "Catatan"],
+      ["Tanggal", "ID Transaksi", "Supplier", "Produk", "Jumlah", "Harga Satuan", "Subtotal", "Catatan"],
       ...barisPembelian.map((row) => [row.tanggal, row.transaksi_id, row.supplier_nama || "", row.produk_nama, row.qty, row.harga_satuan, row.subtotal, row.catatan || ""]),
       ["TOTAL", "", "", "", totalQtyPembelian, "", totalPembelian, ""],
     ];
@@ -370,57 +379,102 @@ export default function Laporan() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", width: "100%" }}>
-        <span className="text-headline-md">Laporan</span>
-        <div style={{ display: "flex", gap: "0.5rem", flex: 1, justifyContent: "flex-end", minWidth: "240px" }}>
-          {tab === "penjualan" ? (
-            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", gap: "0.5rem" }}>
-              <button className="btn-secondary" onClick={exportCsv} disabled={!barisProduk.length}>Export CSV</button>
-              <button className="btn-primary" onClick={cetakPdf} disabled={generating || !barisProduk.length} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 16px" }}>
-                {generating ? <span className="spinner" style={{ width: "14px", height: "14px" }} /> : <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>picture_as_pdf</span>}
-                {generating ? "Membuat PDF…" : "Cetak PDF"}
-              </button>
-            </div>
-          ) : tab === "inventori" ? (
-            <button className="btn-primary" onClick={exportInventoriCsv} disabled={!barisInv.length}>Export CSV</button>
-          ) : tab === "pelanggan" ? (
-            <button className="btn-primary" onClick={exportPelangganCsv} disabled={!barisPelanggan.length}>Export CSV</button>
-          ) : tab === "pembelian" ? (
-            <button className="btn-primary" onClick={exportPembelianCsv} disabled={!barisPembelian.length}>Export CSV</button>
-          ) : tab === "pengeluaran" ? (
-            <button className="btn-primary" onClick={exportPengeluaranCsv} disabled={!barisPengeluaran.length}>Export CSV</button>
-          ) : (
-            <button className="btn-primary" onClick={exportMarginCsv} disabled={!barisProduk.length}>Export CSV</button>
-          )}
+    <PageShell
+      eyebrow="ANALITIK"
+      title="Laporan"
+      description="Ringkasan penjualan, inventori, pelanggan, pembelian, pengeluaran, dan margin. Export CSV atau cetak PDF."
+      actions={
+        tab === "penjualan" ? (
+          <>
+            <button type="button" className="btn-secondary" onClick={exportCsv} disabled={!barisProduk.length}>Export CSV</button>
+            <button type="button" className="btn-primary" onClick={cetakPdf} disabled={generating || !barisProduk.length}>
+              {generating ? "Membuat PDF..." : "Cetak PDF"}
+            </button>
+          </>
+        ) : tab === "inventori" ? (
+          <button type="button" className="btn-primary" onClick={exportInventoriCsv} disabled={!barisInv.length}>Export CSV</button>
+        ) : tab === "pelanggan" ? (
+          <button type="button" className="btn-primary" onClick={exportPelangganCsv} disabled={!barisPelanggan.length}>Export CSV</button>
+        ) : tab === "pembelian" ? (
+          <button type="button" className="btn-primary" onClick={exportPembelianCsv} disabled={!barisPembelian.length}>Export CSV</button>
+        ) : tab === "pengeluaran" ? (
+          <button type="button" className="btn-primary" onClick={exportPengeluaranCsv} disabled={!barisPengeluaran.length}>Export CSV</button>
+        ) : (
+          <button type="button" className="btn-primary" onClick={exportMarginCsv} disabled={!barisProduk.length}>Export CSV</button>
+        )
+      }
+      stats={
+        tab === "penjualan"
+          ? [
+              { label: "Omzet", value: loading ? "…" : rupiah(totalHarga), icon: "payments", tone: "var(--color-income-green)" },
+              { label: "Retur", value: loading ? "…" : rupiah(totalRetur), icon: "undo", tone: "var(--color-expense-red)" },
+              { label: "Bersih", value: loading ? "…" : rupiah(totalHarga - totalRetur), icon: "savings" },
+              { label: "Modal", value: loading ? "…" : rupiah(totalModal), icon: "inventory_2" },
+            ]
+          : tab === "inventori"
+          ? [
+              { label: "SKU Aktif", value: loadingInv ? "…" : (ringkasanInv?.total_sku ?? 0), icon: "inventory" },
+              { label: "Nilai Modal", value: loadingInv ? "…" : rupiah(ringkasanInv?.nilai_modal), icon: "payments" },
+              { label: "Stok Menipis", value: loadingInv ? "…" : (ringkasanInv?.stok_menipis ?? 0), icon: "warning", tone: "var(--color-warning-amber)" },
+            ]
+          : tab === "pembelian"
+          ? [
+              { label: "Total Pembelian", value: loadingPembelian ? "…" : rupiah(totalPembelian), icon: "local_shipping" },
+              { label: "Jumlah", value: loadingPembelian ? "…" : totalQtyPembelian, icon: "shopping_cart" },
+            ]
+          : tab === "pengeluaran"
+          ? [
+              { label: "Total Pengeluaran", value: loadingPengeluaran ? "…" : rupiah(totalPengeluaran), icon: "money_off", tone: "var(--color-expense-red)" },
+            ]
+          : tab === "margin"
+          ? [
+              { label: "Omzet", value: loading ? "…" : rupiah(totalHarga), icon: "trending_up" },
+              { label: "Laba", value: loading ? "…" : rupiah(totalHarga - totalModal), icon: "savings", tone: "var(--color-income-green)" },
+            ]
+          : [
+              { label: "Pelanggan", value: loadingPelanggan ? "…" : barisPelanggan.length, icon: "group" },
+            ]
+      }
+    >
+      <InfoNote icon="analytics">
+        Pilih tab laporan, atur rentang tanggal, lalu export CSV atau cetak PDF (tab Penjualan).
+      </InfoNote>
+
+      <section className="sales-panel" style={{ padding: "1rem", marginBottom: "1rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div>
+            <label className="input-label">Dari Tanggal</label>
+            <DateField value={dari} onChange={setDari} />
+          </div>
+          <div>
+            <label className="input-label">Sampai Tanggal</label>
+            <DateField value={sampai} onChange={setSampai} />
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* Tab laporan — dropdown untuk layar sempit */}
       <div className="card" style={{ padding: "0.75rem", background: "var(--color-surface-container-low)" }}>
-        <select
-          value={tab}
-          onChange={(e) => setTab(e.target.value)}
-          style={{
-            width: "100%", padding: "10px 14px", borderRadius: "10px",
-            border: "1px solid var(--color-surface-border)",
-            background: "var(--color-surface)", color: "var(--color-text-primary)",
-            fontSize: "14px", fontWeight: 600, cursor: "pointer",
-          }}>
-          <option value="penjualan">Penjualan</option>
-          <option value="inventori">Inventori</option>
-          <option value="pelanggan">Pelanggan</option>
-          <option value="pembelian">Pembelian</option>
-          <option value="pengeluaran">Pengeluaran</option>
-          <option value="margin">Margin</option>
-        </select>
+         <SearchSelect
+           value={tab}
+           onChange={setTab}
+           style={{ width: "100%" }}
+           options={[
+             { value: "penjualan", label: "Penjualan" },
+             { value: "inventori", label: "Inventori" },
+             { value: "pelanggan", label: "Pelanggan" },
+             { value: "pembelian", label: "Pembelian" },
+             { value: "pengeluaran", label: "Pengeluaran" },
+             { value: "margin", label: "Margin" },
+           ]}
+         />
       </div>
 
       {tab === "penjualan" ? (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><DateField value={dari} onChange={setDari} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><DateField value={sampai} onChange={setSampai} /></div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -454,7 +508,7 @@ export default function Laporan() {
           </div>
         </div>
       ) : tab === "inventori" ? (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
             {[
               ["Total SKU", `${ringkasanInv?.total_sku || 0} Produk`],
@@ -480,7 +534,7 @@ export default function Laporan() {
           </div>
         </div>
       ) : tab === "pelanggan" ? (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
             <div className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary-container)", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.8 }}>Total Pelanggan</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPelanggan ? "…" : pelangganAktif.length}</p></div>
             <div className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary-container)", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.8 }}>Total Belanja</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPelanggan ? "…" : rupiah(totalBelanjaPelanggan)}</p></div>
@@ -499,26 +553,26 @@ export default function Laporan() {
           </div>
         </div>
       ) : tab === "pembelian" ? (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><DateField value={dari} onChange={setDari} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><DateField value={sampai} onChange={setSampai} /></div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
             <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-primary-container), var(--color-tertiary-container))", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Total Pembelian</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : rupiah(totalPembelian)}</p></div>
-            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-secondary-container), var(--color-warning-amber))", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Qty Restock</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : totalQtyPembelian.toLocaleString("id-ID")}</p></div>
+            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-secondary-container), var(--color-warning-amber))", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Jumlah Restock</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : totalQtyPembelian.toLocaleString("id-ID")}</p></div>
           </div>
 
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Laporan Pembelian Supplier</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "860px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Tanggal</th><th style={{ padding: "10px" }}>Supplier</th><th style={{ padding: "10px" }}>Produk</th><th style={{ padding: "10px", textAlign: "right" }}>Qty</th><th style={{ padding: "10px", textAlign: "right" }}>Harga</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Subtotal</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Tanggal</th><th style={{ padding: "10px" }}>Supplier</th><th style={{ padding: "10px" }}>Produk</th><th style={{ padding: "10px", textAlign: "right" }}>Jumlah</th><th style={{ padding: "10px", textAlign: "right" }}>Harga</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Subtotal</th></tr></thead>
               <tbody>
                 {loadingPembelian ? <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center" }}>Memuat pembelian...</td></tr> : barisPembelian.length === 0 ? (
                   <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada pembelian pada periode ini.</td></tr>
                 ) : (<>
-                  {barisPembelian.map((row, i) => <tr key={`${row.transaksi_id}-${i}`} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{row.tanggal}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.supplier_nama || "—"}</td><td style={{ padding: "10px" }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.qty}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.harga_satuan)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700 }}>{rupiah(row.subtotal)}</td></tr>)}
+                  {barisPembelian.map((row, i) => <tr key={`${row.transaksi_id}-${i}`} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.supplier_nama || "—"}</td><td style={{ padding: "10px" }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.qty}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.harga_satuan)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700 }}>{rupiah(row.subtotal)}</td></tr>)}
                   <tr style={{ background: "#fef3c7", color: "#92400e", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{totalQtyPembelian}</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalPembelian)}</td></tr>
                 </>)}
               </tbody>
@@ -526,10 +580,10 @@ export default function Laporan() {
           </div>
         </div>
       ) : tab === "pengeluaran" ? (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><DateField value={dari} onChange={setDari} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><DateField value={sampai} onChange={setSampai} /></div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -547,7 +601,7 @@ export default function Laporan() {
                 {loadingPengeluaran ? <tr><td colSpan={4} style={{ padding: "20px", textAlign: "center" }}>Memuat pengeluaran...</td></tr> : barisPengeluaran.length === 0 ? (
                   <tr><td colSpan={4} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada pengeluaran pada periode ini.</td></tr>
                 ) : (<>
-                  {barisPengeluaran.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{row.tanggal}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.kategori}</td><td style={{ padding: "10px" }}>{row.keterangan || "—"}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(row.jumlah)}</td></tr>)}
+                  {barisPengeluaran.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.kategori}</td><td style={{ padding: "10px" }}>{row.keterangan || "—"}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(row.jumlah)}</td></tr>)}
                   <tr style={{ background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalPengeluaran)}</td></tr>
                 </>)}
               </tbody>
@@ -555,10 +609,10 @@ export default function Laporan() {
           </div>
         </div>
       ) : (
-        <div className="card" style={{ padding: "1.25rem" }}>
+        <div className="card" style={{ padding: "1.25rem", background: "var(--color-surface-container)" }}>
           <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Dari Tanggal</label><DateField value={dari} onChange={setDari} /></div>
+            <div style={{ flex: 1 }}><label className="input-label">Sampai Tanggal</label><DateField value={sampai} onChange={setSampai} /></div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -617,6 +671,6 @@ export default function Laporan() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

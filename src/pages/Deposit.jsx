@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
-
-const rupiah = (value) => `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
+import { formatDateTimeId } from "../utils/dateFormat";
+import SearchSelect from "../components/SearchSelect";
+import RupiahInput from "../components/RupiahInput";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
 
 export default function Deposit() {
   const { addToast } = useToast();
@@ -71,29 +73,45 @@ export default function Deposit() {
   const openUse = (cust) => { setUseForm({ ...useForm, customerId: cust.id }); setShowUseModal(true); };
   const viewLogs = (cust) => { setSelectedCustomer(cust); loadLogs(cust.id); };
 
+  // Escape closes the active deposit modal without interrupting an async submit.
+  useEffect(() => {
+    /** Handles Escape for the currently visible deposit modal. */
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        if (showTopUpModal) setShowTopUpModal(false);
+        else if (showUseModal) setShowUseModal(false);
+      }
+    };
+    if (showTopUpModal || showUseModal) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [showTopUpModal, showUseModal]);
+
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div><p className="sales-page__eyebrow">KEUANGAN</p><h1 className="text-headline-lg">Deposit Pelanggan</h1><p className="text-body-md sales-page__subtitle">Kelola saldo prabayar pelanggan: top-up, pemakaian, dan histori transaksi.</p></div>
+    <PageShell
+      eyebrow="KEUANGAN"
+      title="Deposit Pelanggan"
+      description="Kelola saldo prabayar pelanggan: top-up, pemakaian, dan histori transaksi."
+      actions={
         <button className="btn-primary sales-page__add" onClick={() => setShowTopUpModal(true)}><span className="material-symbols-outlined">add</span>Top-Up</button>
-      </header>
-
-      <section className="sales-stats">
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: "var(--color-income-green)" }}>account_balance_wallet</span><div><span>Total saldo deposit</span><strong>{rupiah(totalSaldo)}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>person</span><div><span>Pelanggan aktif</span><strong>{activeDeposits}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined" style={{ color: "var(--color-warning-amber)" }}>people</span><div><span>Total pelanggan</span><strong>{customers.length}</strong></div></div>
-      </section>
-
+      }
+      stats={[
+        { label: "Total saldo deposit", value: rupiah(totalSaldo), icon: "account_balance_wallet", tone: "var(--color-income-green)" },
+        { label: "Pelanggan aktif", value: activeDeposits, icon: "person", tone: "var(--color-primary)" },
+        { label: "Total pelanggan", value: customers.length, icon: "people", tone: "var(--color-warning-amber)" },
+      ]}
+    >
       <section className="sales-panel">
         <div className="sales-panel__toolbar"><div className="sales-search"><span className="material-symbols-outlined">search</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari nama atau telepon pelanggan..." /></div><button className="btn-secondary" onClick={() => { loadCustomers(); loadAllDeposits(); }}><span className="material-symbols-outlined">refresh</span>Refresh</button></div>
         {filteredCustomers.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">account_balance_wallet</span><h3>Belum ada pelanggan</h3><p>Tambahkan pelanggan terlebih dahulu di menu Master Data untuk mulai mengelola deposit.</p></div> : <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Nama</th><th>Telepon</th><th>Saldo</th><th>Aksi</th></tr></thead><tbody>{filteredCustomers.map((cust) => { const dep = deposits.find((d) => d.customer_id === cust.id); return <tr key={cust.id}><td><strong>{cust.nama}</strong></td><td>{cust.telepon || "-"}</td><td>{dep ? rupiah(dep.saldo) : rupiah(0)}</td><td><div style={{ display: "flex", gap: 6 }}><button className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openTopUp(cust)}>Top-Up</button><button className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => openUse(cust)}>Gunakan</button><button className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => viewLogs(cust)}>Log</button></div></td></tr>; })}</tbody></table></div>}
       </section>
 
-      {selectedCustomer && <section className="sales-panel" style={{ padding: "1.25rem" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><div><p className="sales-page__eyebrow">RIWAYAT TRANSAKSI</p><h2 className="text-headline-sm">{selectedCustomer.nama}</h2></div><button className="icon-button" onClick={() => setSelectedCustomer(null)}><span className="material-symbols-outlined">close</span></button></div>{logs.length === 0 ? <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>Belum ada transaksi deposit</p> : <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Tanggal</th><th>Tipe</th><th>Nominal</th><th>Saldo Sebelum</th><th>Saldo Sesudah</th><th>Keterangan</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{log.created_at}</td><td><span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: log.tipe === "topup" ? "var(--color-income-green)" : "var(--color-warning-amber)", color: "white" }}>{log.tipe}</span></td><td>{rupiah(log.nominal)}</td><td>{rupiah(log.saldo_sebelum)}</td><td>{rupiah(log.saldo_sesudah)}</td><td>{log.keterangan || "-"}</td></tr>)}</tbody></table></div>}</section>}
+      {selectedCustomer && <section className="sales-panel" style={{ padding: "1.25rem" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><div><p className="sales-page__eyebrow">RIWAYAT TRANSAKSI</p><h2 className="text-headline-sm">{selectedCustomer.nama}</h2></div><button className="icon-button" onClick={() => setSelectedCustomer(null)}><span className="material-symbols-outlined">close</span></button></div>{logs.length === 0 ? <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>Belum ada transaksi deposit</p> : <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Tanggal</th><th>Tipe</th><th>Nominal</th><th>Saldo Sebelum</th><th>Saldo Sesudah</th><th>Keterangan</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{formatDateTimeId(log.created_at)}</td><td><span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: log.tipe === "topup" ? "var(--color-income-green)" : "var(--color-warning-amber)", color: "white" }}>{log.tipe}</span></td><td>{rupiah(log.nominal)}</td><td>{rupiah(log.saldo_sebelum)}</td><td>{rupiah(log.saldo_sesudah)}</td><td>{log.keterangan || "-"}</td></tr>)}</tbody></table></div>}</section>}
 
-      {showTopUpModal && <div className="modal-overlay" onClick={() => setShowTopUpModal(false)}><div className="modal-content sales-form-modal" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><p className="sales-page__eyebrow">TOP-UP</p><h2 className="text-headline-sm">Tambah Saldo Deposit</h2></div><button className="icon-button" onClick={() => setShowTopUpModal(false)}><span className="material-symbols-outlined">close</span></button></div><form className="sales-form" onSubmit={handleTopUp}><label>Pelanggan<select className="input-field" required value={topUpForm.customerId} onChange={(e) => setTopUpForm({ ...topUpForm, customerId: e.target.value })}><option value="">Pilih pelanggan</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.nama} — {c.telepon || "tanpa telepon"}</option>)}</select></label><label>Nominal<input className="input-field" type="number" min="1" required value={topUpForm.nominal} onChange={(e) => setTopUpForm({ ...topUpForm, nominal: e.target.value })} /></label><label>Keterangan<input className="input-field" value={topUpForm.keterangan} onChange={(e) => setTopUpForm({ ...topUpForm, keterangan: e.target.value })} /></label><div className="sales-form__actions"><button type="button" className="btn-secondary" onClick={() => setShowTopUpModal(false)}>Batal</button><button className="btn-primary">Top-Up</button></div></form></div></div>}
+      {showTopUpModal && <div className="modal-overlay" onClick={() => setShowTopUpModal(false)}><div className="modal-content sales-form-modal" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><p className="sales-page__eyebrow">TOP-UP</p><h2 className="text-headline-sm">Tambah Saldo Deposit</h2></div><button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setShowTopUpModal(false)}><span className="material-symbols-outlined">close</span></button></div><form className="sales-form" onSubmit={handleTopUp}><label>Pelanggan<SearchSelect className="input-field" required value={topUpForm.customerId} onChange={(value) => setTopUpForm({ ...topUpForm, customerId: value })} placeholder="Pilih pelanggan" options={customers.map((c) => ({ value: String(c.id), label: `${c.nama} — ${c.telepon || "tanpa telepon"}` }))} /></label><label>Nominal<RupiahInput value={topUpForm.nominal} onChange={(val) => setTopUpForm({ ...topUpForm, nominal: val })} required /></label><label>Keterangan<input className="input-field" value={topUpForm.keterangan} onChange={(e) => setTopUpForm({ ...topUpForm, keterangan: e.target.value })} /></label><div className="sales-form__actions"><button type="button" className="btn-secondary" onClick={() => setShowTopUpModal(false)}>Batal</button><button className="btn-primary">Top-Up</button></div></form></div></div>}
 
-      {showUseModal && <div className="modal-overlay" onClick={() => setShowUseModal(false)}><div className="modal-content sales-form-modal" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><p className="sales-page__eyebrow">GUNAKAN</p><h2 className="text-headline-sm">Gunakan Deposit</h2></div><button className="icon-button" onClick={() => setShowUseModal(false)}><span className="material-symbols-outlined">close</span></button></div><form className="sales-form" onSubmit={handleUse}><label>Pelanggan<select className="input-field" required value={useForm.customerId} onChange={(e) => setUseForm({ ...useForm, customerId: e.target.value })}><option value="">Pilih pelanggan</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.nama} — {c.telepon || "tanpa telepon"}</option>)}</select></label><label>Nominal<input className="input-field" type="number" min="1" required value={useForm.nominal} onChange={(e) => setUseForm({ ...useForm, nominal: e.target.value })} /></label><label>Keterangan<input className="input-field" value={useForm.keterangan} onChange={(e) => setUseForm({ ...useForm, keterangan: e.target.value })} /></label><div className="sales-form__actions"><button type="button" className="btn-secondary" onClick={() => setShowUseModal(false)}>Batal</button><button className="btn-primary">Gunakan</button></div></form></div></div>}
-    </div>
+      {showUseModal && <div className="modal-overlay" onClick={() => setShowUseModal(false)}><div className="modal-content sales-form-modal" onClick={(e) => e.stopPropagation()}><div className="sales-modal__header"><div><p className="sales-page__eyebrow">GUNAKAN</p><h2 className="text-headline-sm">Gunakan Deposit</h2></div><button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setShowUseModal(false)}><span className="material-symbols-outlined">close</span></button></div><form className="sales-form" onSubmit={handleUse}><label>Pelanggan<SearchSelect className="input-field" required value={useForm.customerId} onChange={(value) => setUseForm({ ...useForm, customerId: value })} placeholder="Pilih pelanggan" options={customers.map((c) => ({ value: String(c.id), label: `${c.nama} — ${c.telepon || "tanpa telepon"}` }))} /></label><label>Nominal<RupiahInput value={useForm.nominal} onChange={(val) => setUseForm({ ...useForm, nominal: val })} required /></label><label>Keterangan<input className="input-field" value={useForm.keterangan} onChange={(e) => setUseForm({ ...useForm, keterangan: e.target.value })} /></label><div className="sales-form__actions"><button type="button" className="btn-secondary" onClick={() => setShowUseModal(false)}>Batal</button><button className="btn-primary">Gunakan</button></div></form></div></div>}
+    </PageShell>
   );
 }

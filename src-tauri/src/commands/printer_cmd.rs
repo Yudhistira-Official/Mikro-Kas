@@ -1,24 +1,22 @@
-//! Commands printer — generate receipt text for 58mm thermal printers (Xpos 58, USB/RJ-11)
+//! Commands printer — ESC/POS thermal (universal path/port + auto-detect)
 use crate::db::DbState;
 use rusqlite::params;
-use tauri::State;
+use serde::Serialize;
 use std::io::Write;
+use std::path::Path;
+use tauri::State;
 
 /// Membangun teks struk dari data transaksi.
-///
-/// Parameters:
-/// - `transaksi_id`: ID transaksi yang akan dicetak
-///
-/// Returns:
-/// - `String`: Teks struk siap cetak
 #[tauri::command]
 pub fn build_struk_text(state: State<DbState>, transaksi_id: i64) -> Result<String, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
 
     let (nama_toko, qris): (String, Option<String>) = conn
-        .query_row("SELECT nama_toko, qris_statis FROM toko WHERE id=1", [], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            "SELECT nama_toko, qris_statis FROM toko WHERE id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .map_err(|_| "Toko tidak ditemukan".to_string())?;
 
     let (total, metode_bayar, tanggal, catatan): (i64, String, String, Option<String>) = conn
@@ -85,47 +83,138 @@ pub fn build_struk_text(state: State<DbState>, transaksi_id: i64) -> Result<Stri
     Ok(text)
 }
 
-/// Mengirim struk ke printer thermal 58mm via USB device node.
-/// Mencoba /dev/usb/lp0, lp1, lp2 secara berurutan.
-/// ESC/POS: ESC @ (init), teks, ESC d 4 (feed 4 baris), GS V 0 (cut).
-///
-/// Parameters:
-/// - `transaksi_id`: ID transaksi yang akan dicetak
-///
-/// Returns:
-/// - `String`: Pesan sukses dengan nama device yang digunakan
-#[tauri::command]
-pub fn print_struk(state: State<DbState>, transaksi_id: i64) -> Result<String, String> {
-    let text = build_struk_text(state, transaksi_id)?;
+/// Candidate printer paths for auto-detect (Windows / Linux / macOS-ish).
+fn default_candidates() -> Vec<String> {
+    let mut out = Vec::new();
 
-    // ESC/POS init + teks + feed + cut
-    let mut data: Vec<u8> = Vec::new();
-    data.extend_from_slice(b"\x1B@");       // ESC @ — init printer
-    data.extend_from_slice(text.as_bytes());
-    data.extend_from_slice(b"\x1Bd\x04");  // ESC d 4 — feed 4 lines
-    data.extend_from_slice(b"\x1DV\x00"); // GS V 0 — full cut
-
-    // Kandidat device: Linux USB, Windows USB printer port, Windows COM port
     #[cfg(target_os = "windows")]
-    let candidates: &[&str] = &[
-        "\\\\.\\USB001", "\\\\.\\USB002", "\\\\.\\USB003",
-        "\\\\.\\COM1",  "\\\\.\\COM2",  "\\\\.\\COM3",
-        "\\\\.\\COM4",  "\\\\.\\COM5",  "\\\\.\\COM6",
-        "\\\\.\\COM7",  "\\\\.\\COM8",  "\\\\.\\COM9",
-    ];
-    #[cfg(not(target_os = "windows"))]
-    let candidates: &[&str] = &[
-        "/dev/usb/lp0", "/dev/usb/lp1", "/dev/usb/lp2",
-    ];
-
-    for dev in candidates {
-        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(dev) {
-            f.write_all(&data).map_err(|e| format!("Gagal kirim ke {dev}: {e}"))?;
-            return Ok(format!("Cetak ke {dev} berhasil"));
+    {
+        for i in 1..=9 {
+            out.push(format!(r"\\.\USB00{}", i));
+            out.push(format!(r"\\.\COM{}", i));
+        }
+        for i in 10..=20 {
+            out.push(format!(r"\\.\COM{}", i));
         }
     }
 
-    Err("Printer tidak ditemukan. Pastikan printer terhubung dan driver terinstal.".to_string())
+    #[cfg(not(target_os = "windows"))]
+    {
+        for i in 0..=9 {
+            out.push(format!("/dev/usb/lp{}", i));
+        }
+        for i in 0..=9 {
+            out.push(format!("/dev/lp{}", i));
+        }
+        // Serial USB adapters (common for thermal printers)
+        for name in [
+            "/dev/ttyUSB0",
+            "/dev/ttyUSB1",
+            "/dev/ttyUSB2",
+            "/dev/ttyACM0",
+            "/dev/ttyACM1",
+            "/dev/ttyS0",
+            "/dev/ttyS1",
+        ] {
+            out.push(name.to_string());
+        }
+        // Scan /dev for more ttyUSB* / ttyACM* if present
+        if let Ok(entries) = std::fs::read_dir("/dev") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("ttyUSB")
+                    || name.starts_with("ttyACM")
+                    || name.starts_with("usb/lp")
+                {
+                    let path = format!("/dev/{}", name);
+                    if !out.contains(&path) {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn build_escpos_payload(text: &str) -> Vec<u8> {
+    let mut data: Vec<u8> = Vec::new();
+    data.extend_from_slice(b"\x1B@"); // ESC @ init
+                                      // Code page / simple text (CP437-compatible ASCII + latin digits)
+    data.extend_from_slice(text.as_bytes());
+    data.extend_from_slice(b"\n\n");
+    data.extend_from_slice(b"\x1Bd\x04"); // ESC d 4 feed
+    data.extend_from_slice(b"\x1DV\x00"); // GS V 0 full cut (ignored if unsupported)
+    data
+}
+
+fn try_write_device(path: &str, data: &[u8]) -> Result<(), String> {
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("Buka {path}: {e}"))?;
+    f.write_all(data)
+        .map_err(|e| format!("Tulis {path}: {e}"))?;
+    let _ = f.flush();
+    Ok(())
+}
+
+/// Lists candidate printer paths that currently exist / can open for write.
+#[derive(Debug, Serialize)]
+pub struct PrinterCandidate {
+    pub path: String,
+    pub writable: bool,
+}
+
+#[tauri::command]
+pub fn list_printer_candidates() -> Result<Vec<PrinterCandidate>, String> {
+    let mut list = Vec::new();
+    for path in default_candidates() {
+        let exists = Path::new(&path).exists() || path.starts_with(r"\\.\");
+        if !exists && !path.starts_with(r"\\.\") {
+            continue;
+        }
+        let writable = std::fs::OpenOptions::new().write(true).open(&path).is_ok();
+        list.push(PrinterCandidate { path, writable });
+    }
+    Ok(list)
+}
+
+/// Prints receipt to preferred path if provided, otherwise auto-detects.
+///
+/// Parameters:
+/// - `transaksi_id`: transaction id
+/// - `printer_path`: optional override (COM3, /dev/usb/lp0, \\.\USB001, …)
+#[tauri::command]
+pub fn print_struk(
+    state: State<DbState>,
+    transaksi_id: i64,
+    printer_path: Option<String>,
+) -> Result<String, String> {
+    let text = build_struk_text(state, transaksi_id)?;
+    let data = build_escpos_payload(&text);
+
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(p) = printer_path {
+        let p = p.trim().to_string();
+        if !p.is_empty() {
+            candidates.push(p);
+        }
+    }
+    candidates.extend(default_candidates());
+
+    let mut last_err = String::from("Tidak ada printer yang dapat ditulis.");
+    for dev in candidates {
+        match try_write_device(&dev, &data) {
+            Ok(()) => return Ok(format!("Cetak ke {dev} berhasil")),
+            Err(e) => last_err = e,
+        }
+    }
+
+    Err(format!(
+        "Printer tidak ditemukan / tidak bisa ditulis. {last_err} Atur path di Profil Perusahaan atau pasang printer ESC/POS USB."
+    ))
 }
 
 fn format_rupiah(amount: i64) -> String {

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
 
 export default function Log() {
   const { addToast } = useToast();
@@ -103,33 +104,16 @@ export default function Log() {
   const sizeKb = logContent ? (new Blob([logContent]).size / 1024).toFixed(1) : "0";
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">SISTEM</p>
-          <h1 className="text-headline-lg">Log Aplikasi</h1>
-          <p className="text-body-md sales-page__subtitle">Diagnostik dan jejak aktivitas aplikasi untuk debugging.</p>
-        </div>
-      </header>
-
+    <PageShell
+      eyebrow="SISTEM"
+      title="Log Aplikasi"
+      description="Diagnostik dan jejak aktivitas aplikasi untuk debugging."
+      stats={[
+        { label: "Jumlah Baris", value: lineCount, icon: "format_list_numbered" },
+        { label: "Ukuran", value: (<>{sizeKb} KB</>), icon: "data_usage" },
+      ]}
+    >
       {/* Stats */}
-      <section className="sales-stats">
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">format_list_numbered</span>
-          <div><span>Jumlah Baris</span><strong>{lineCount}</strong></div>
-        </div>
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">data_usage</span>
-          <div><span>Ukuran</span><strong>{sizeKb} KB</strong></div>
-        </div>
-        <div className="sales-stat-card" style={{ cursor: "pointer" }} onClick={() => setAutoRefresh((v) => !v)}>
-          <span className="material-symbols-outlined" style={{ color: autoRefresh ? "var(--color-income-green)" : undefined }}>
-            {autoRefresh ? "timer" : "timer_off"}
-          </span>
-          <div><span>Auto Refresh</span><strong style={{ color: autoRefresh ? "var(--color-income-green)" : "var(--color-text-secondary)" }}>{autoRefresh ? "Aktif (5s)" : "Nonaktif"}</strong></div>
-        </div>
-      </section>
-
       {/* Toolbar */}
       <section className="sales-panel" style={{ padding: "0.875rem 1rem" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
@@ -208,6 +192,6 @@ export default function Log() {
           )}
         </div>
       </section>
-    </div>
+    </PageShell>
   );
 }

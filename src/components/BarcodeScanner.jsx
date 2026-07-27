@@ -29,6 +29,13 @@ export default function BarcodeScanner({ onDetected, onClose }) {
   const [busy, setBusy] = useState(false)
   const [autoReady, setAutoReady] = useState(false)
 
+  // Escape menutup scanner tanpa mengganggu pemindaian yang sedang berjalan.
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === "Escape" && !busy) { e.preventDefault(); onClose(); } };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose, busy]);
+
   // Cek bridge — inject via onWebViewCreate, harus ready.
   useEffect(() => {
     const t = setTimeout(() => {
@@ -199,10 +206,14 @@ export default function BarcodeScanner({ onDetected, onClose }) {
           background: "#ffffff",
           boxShadow: "0 24px 60px rgba(15, 23, 42, 0.35)",
           textAlign: "center",
-          position: "relative",
-        }}
-      >
-        <div
+           position: "relative",
+         }}
+       >
+         {/* Tombol close X tetap tersedia; disabled saat kamera sedang memproses. */}
+         <button type="button" onClick={close} disabled={busy} aria-label="Tutup" style={{ position: "absolute", top: 10, right: 10, border: 0, background: "transparent", color: "#475569", cursor: busy ? "not-allowed" : "pointer" }}>
+           <span className="material-symbols-outlined">close</span>
+         </button>
+         <div
           style={{
             width: 72,
             height: 72,
@@ -210,7 +221,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
             borderRadius: 22,
             display: "grid",
             placeItems: "center",
-            background: "linear-gradient(135deg, #7C3AED, #06B6D4)",
+            background: "var(--color-accent-gradient)",
             color: "white",
           }}
         >
@@ -222,7 +233,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
 
         {!error && !busy && status !== "Membuka kamera..." && (
           <div style={{ height: 4, borderRadius: 999, overflow: "hidden", background: "#ede9fe", marginBottom: 14 }}>
-            <div style={{ width: "60%", height: "100%", background: "linear-gradient(90deg, #7C3AED, #06B6D4)" }} />
+            <div style={{ width: "60%", height: "100%", background: "var(--color-accent-gradient)" }} />
           </div>
         )}
 
@@ -243,7 +254,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
               border: 0,
               borderRadius: 16,
               padding: "13px 16px",
-              background: !autoReady ? "#a78bfa" : "linear-gradient(135deg, #7C3AED, #06B6D4)",
+              background: !autoReady ? "var(--color-primary-fixed-dim)" : "var(--color-accent-gradient)",
               color: "white",
               fontWeight: 800,
               fontSize: 15,

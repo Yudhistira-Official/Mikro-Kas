@@ -1,79 +1,140 @@
 // ============================================================
-// RiwayatPembelian.jsx — Riwayat pembelian supplier + filter
-//
-// Menampilkan daftar transaksi pembelian dengan info supplier,
-// total, tanggal, dan item detail. Mendukung filter tanggal
-// serta pencarian nama supplier untuk keperluan audit pembelian.
+// RiwayatPembelian.jsx — Riwayat pembelian supplier (PageKit)
 // ============================================================
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, DataTable, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import DateField from "../components/DateField";
+import { formatDateTimeId } from "../utils/dateFormat";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Halaman riwayat restock supplier dengan filter tanggal dan pencarian.
+ */
 export default function RiwayatPembelian() {
   const { addToast } = useToast();
   const [dari, setDari] = useState(today);
   const [sampai, setSampai] = useState(today);
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke("list_transaksi", { tipe: "pembelian", dariTanggal: dari, sampaiTanggal: sampai, limit: 100 });
+      const data = await invoke("list_transaksi", {
+        tipe: "pembelian",
+        dariTanggal: dari,
+        sampaiTanggal: sampai,
+        limit: 100,
+      });
       setList(data);
-    } catch (e) { addToast(`Gagal memuat riwayat pembelian: ${e}`, "error"); }
-    finally { setLoading(false); }
-  };
+    } catch (e) {
+      addToast(`Gagal memuat riwayat pembelian: ${e}`, "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, dari, sampai]);
 
-  useEffect(() => { load(); }, [dari, sampai]);
+  useEffect(() => { void load(); }, [load]);
 
-  const filtered = list.filter((t) => {
-    if (!query.trim()) return true;
-    return (t.supplier_nama || "").toLowerCase().includes(query.toLowerCase()) ||
-           (t.catatan || "").toLowerCase().includes(query.toLowerCase()) ||
-           String(t.id).includes(query);
-  });
+  const { query, setQuery, filtered } = useSearchFilter(list, (t) =>
+    `${t.supplier_nama || ""} ${t.catatan || ""} ${t.id}`
+  );
+
+  const total = filtered.reduce((s, t) => s + Number(t.total || 0), 0);
+
+  const columns = [
+    {
+      key: "id",
+      label: "No",
+      render: (t) => <strong>#{t.id}</strong>,
+    },
+    {
+      key: "supplier",
+      label: "Supplier",
+      render: (t) => t.supplier_nama || "Supplier umum",
+    },
+    {
+      key: "tanggal",
+      label: "Tanggal",
+      render: (t) => formatDateTimeId(t.tanggal),
+    },
+    {
+      key: "total",
+      label: "Total",
+      align: "right",
+      render: (t) => <strong style={{ color: "var(--color-income-green)" }}>{rupiah(t.total)}</strong>,
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (t) => {
+        if (t.status === "lunas") return <StatusBadge label="Lunas" tone="success" />;
+        if (t.status === "belum_lunas") return <StatusBadge label="Belum Lunas" tone="warning" />;
+        return <StatusBadge label="Lunas" tone="success" />;
+      },
+    },
+    {
+      key: "sisa",
+      label: "Sisa",
+      align: "right",
+      render: (t) => {
+        if (t.status === "belum_lunas" && t.sisa > 0) {
+          return <span style={{ color: "var(--color-expense-red)" }}>{rupiah(t.sisa)}</span>;
+        }
+        return <span style={{ color: "var(--color-text-secondary)" }}>—</span>;
+      },
+    },
+    {
+      key: "catatan",
+      label: "Catatan",
+      render: (t) => t.catatan || "—",
+    },
+  ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <p className="text-headline-md">Riwayat Pembelian Supplier</p>
-      <p className="text-body-sm" style={{ color: "var(--color-text-secondary)", marginTop: "-0.25rem" }}>Daftar transaksi restock dari supplier.</p>
+    <PageShell
+      eyebrow="PEMBELIAN"
+      title="Riwayat Pembelian Supplier"
+      description="Daftar transaksi restock dari supplier. Filter tanggal untuk audit pembelian."
+      stats={[
+        { label: "Transaksi", value: filtered.length, icon: "receipt_long" },
+        { label: "Total Nilai", value: rupiah(total), icon: "payments", tone: "var(--color-income-green)" },
+        { label: "Periode", value: `${dari} → ${sampai}`, icon: "calendar_month" },
+      ]}
+    >
+      <InfoNote icon="local_shipping">
+        Data diambil dari transaksi tipe pembelian. Gunakan filter tanggal dan pencarian supplier untuk audit stok masuk.
+      </InfoNote>
 
-      <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", padding: "0.75rem" }}>
-        <div><label className="input-label">Dari</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-        <div><label className="input-label">Sampai</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
-      </div>
-
-      <input className="input-field" placeholder="Cari supplier atau no. transaksi..." value={query} onChange={(e) => setQuery(e.target.value)} />
-
-      {loading ? (
-        <div className="loading-page"><div className="spinner" /></div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state"><span className="material-symbols-outlined">local_shipping</span><p className="text-body-md">Tidak ada pembelian di rentang ini</p></div>
-      ) : (
-        filtered.map((t) => (
-          <div key={t.id} className="card" style={{ padding: "0.75rem", borderLeft: "4px solid var(--color-secondary)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <p className="text-headline-sm">Pembelian #{t.id}</p>
-                <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.2rem" }}>
-                  {t.supplier_nama || "Supplier umum"}
-                </p>
-              </div>
-              <span className="chip chip-cyan">Tunai</span>
-            </div>
-            <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>{t.tanggal?.slice(0, 16)}</p>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
-              <span className="text-headline-sm" style={{ color: "var(--color-income-green)" }}>{rupiah(t.total)}</span>
-              {t.catatan && <span className="text-label-md" style={{ color: "var(--color-text-secondary)", maxWidth: "60%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.catatan}</span>}
-            </div>
+      <section className="sales-panel" style={{ padding: "1rem", marginBottom: "1rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div>
+            <label className="input-label">Dari</label>
+            <DateField value={dari} onChange={setDari} />
           </div>
-        ))
-      )}
-    </div>
+          <div>
+            <label className="input-label">Sampai</label>
+            <DateField value={sampai} onChange={setSampai} />
+          </div>
+        </div>
+      </section>
+
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari supplier, catatan, atau no. transaksi..."
+        onRefresh={load}
+        loading={loading}
+        isEmpty={filtered.length === 0}
+        emptyIcon="local_shipping"
+        emptyTitle="Belum ada pembelian"
+        emptyHint="Ubah rentang tanggal atau lakukan restock di menu Pembelian."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(t) => t.id} />
+      </DataPanel>
+    </PageShell>
   );
 }

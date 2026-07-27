@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
 
 // Log diagnostik tanpa melempar error ke UI.
 const logBackup = (msg) => {
@@ -113,40 +114,17 @@ export default function BackupRestore() {
   };
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">MANAJEMEN DATA</p>
-          <h1 className="text-headline-lg">Backup &amp; Restore</h1>
-          <p className="text-body-md sales-page__subtitle">Simpan salinan database atau pulihkan dari file backup sebelumnya.</p>
-        </div>
-      </header>
-
+    <PageShell
+      eyebrow="MANAJEMEN DATA"
+      title="Backup & Restore"
+      description="Simpan salinan database atau pulihkan dari file backup sebelumnya."
+      stats={[
+        { label: "Format", value: "SQLite .db", icon: "database" },
+        { label: "Lokasi", value: "Pilih via Dialog", icon: "folder_open" },
+        { label: "Metode", value: "Base64 Transfer", icon: "verified_user" },
+      ]}
+    >
       {/* Stats info cards */}
-      <section className="sales-stats">
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">database</span>
-          <div>
-            <span>Format</span>
-            <strong>SQLite .db</strong>
-          </div>
-        </div>
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">folder_open</span>
-          <div>
-            <span>Lokasi</span>
-            <strong>Pilih via Dialog</strong>
-          </div>
-        </div>
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">verified_user</span>
-          <div>
-            <span>Metode</span>
-            <strong>Base64 Transfer</strong>
-          </div>
-        </div>
-      </section>
-
       {/* Status feedback */}
       {lastStatus && (
         <section className="sales-panel" style={{ padding: "1rem" }}>
@@ -219,6 +197,6 @@ export default function BackupRestore() {
           </button>
         </section>
       </div>
-    </div>
+    </PageShell>
   );
 }

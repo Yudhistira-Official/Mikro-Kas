@@ -13,10 +13,29 @@ use tauri::State;
 pub struct Bom {
     pub id: i64,
     pub produk_id: i64,
+    pub produk_nama: String,
+    pub produk_sku: Option<String>,
     pub kode_bom: Option<String>,
+    pub yield_qty: i64,
+    pub gudang_id: Option<i64>,
+    pub gudang_nama: Option<String>,
     pub keterangan: Option<String>,
+    pub catatan: Option<String>,
     pub is_active: i64,
+    pub total_hpp: i64,
+    pub items: Vec<BomItem>,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BomItem {
+    pub id: i64,
+    pub komponen_id: i64,
+    pub kode_bahan: Option<String>,
+    pub nama_bahan: String,
+    pub qty_per_unit: f64,
+    pub satuan: Option<String>,
+    pub estimasi_hpp: i64,
 }
 
 /// Header perakitan produksi.
@@ -41,7 +60,18 @@ pub struct Perakitan {
 pub struct BomInput {
     pub produk_id: i64,
     pub kode_bom: Option<String>,
+    pub yield_qty: Option<i64>,
+    pub gudang_id: Option<i64>,
     pub keterangan: Option<String>,
+    pub catatan: Option<String>,
+    pub items: Option<Vec<BomItemInput>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BomItemInput {
+    pub komponen_id: i64,
+    pub qty_per_unit: f64,
+    pub satuan: Option<String>,
 }
 
 /// Input perakitan minimal.
@@ -65,35 +95,47 @@ pub struct PerakitanInput {
 pub fn create_bom(state: State<DbState>, input: BomInput) -> Result<i64, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO bom (produk_id, kode_bom, keterangan) VALUES (?1, ?2, ?3)",
-        params![input.produk_id, input.kode_bom, input.keterangan],
+        "INSERT INTO bom (produk_id, kode_bom, yield_qty, gudang_id, keterangan, catatan) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![input.produk_id, input.kode_bom, input.yield_qty.unwrap_or(1).max(1), input.gudang_id, input.keterangan, input.catatan],
     )
     .map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    // Insert items if provided
+    if let Some(items) = &input.items {
+        for item in items {
+            conn.execute(
+                "INSERT OR IGNORE INTO bom_item (bom_id, komponen_id, qty_per_unit, satuan) VALUES (?1, ?2, ?3, ?4)",
+                params![id, item.komponen_id, item.qty_per_unit, item.satuan],
+            ).ok();
+        }
+    }
+    Ok(id)
 }
 
-/// Ambil daftar BOM aktif.
-///
-/// Returns: Vec<Bom>
+/// Ambil daftar BOM aktif beserta item komponen.
 #[tauri::command]
 pub fn list_bom(state: State<DbState>) -> Result<Vec<Bom>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, produk_id, kode_bom, keterangan, is_active, created_at
-             FROM bom WHERE is_active = 1 ORDER BY id DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.produk_id, p.nama, p.sku, b.kode_bom, b.yield_qty, b.gudang_id, g.nama, b.keterangan, b.catatan, b.is_active, b.created_at, COALESCE((SELECT SUM(ROUND(bi.qty_per_unit * pr.harga_beli)) FROM bom_item bi JOIN produk pr ON pr.id = bi.komponen_id WHERE bi.bom_id = b.id), 0) FROM bom b JOIN produk p ON p.id = b.produk_id LEFT JOIN gudang g ON g.id = b.gudang_id WHERE b.is_active = 1 ORDER BY b.id DESC",
+    ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(Bom {
                 id: row.get(0)?,
                 produk_id: row.get(1)?,
-                kode_bom: row.get(2)?,
-                keterangan: row.get(3)?,
-                is_active: row.get(4)?,
-                created_at: row.get(5)?,
+                produk_nama: row.get(2)?,
+                produk_sku: row.get(3)?,
+                kode_bom: row.get(4)?,
+                yield_qty: row.get(5)?,
+                gudang_id: row.get(6)?,
+                gudang_nama: row.get(7)?,
+                keterangan: row.get(8)?,
+                catatan: row.get(9)?,
+                is_active: row.get(10)?,
+                total_hpp: row.get(11)?,
+                items: Vec::new(),
+                created_at: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?

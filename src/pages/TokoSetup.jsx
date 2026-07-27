@@ -1,11 +1,19 @@
+// ============================================================
+// TokoSetup.jsx — Multi-profil QRIS statis (PageKit).
+//
+// Commands: list_qris_profile, save_qris_profile, delete_qris_profile,
+//   set_active_qris_profile, parse_qris, write_log
+// ============================================================
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import decodeQrImage from "../utils/decodeQrImage";
+import {
+  PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter,
+} from "../components/PageKit";
 
 /**
- * Halaman multi-profil QRIS statis.
- * CRUD dan pemilihan profil aktif tetap menggunakan command backend yang ada.
+ * Halaman multi-profil QRIS statis: CRUD + set aktif + upload gambar / paste string.
  */
 export default function TokoSetup() {
   const { addToast } = useToast();
@@ -36,6 +44,13 @@ export default function TokoSetup() {
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
+  const { query, setQuery, filtered } = useSearchFilter(
+    profiles,
+    (p) => `${p.nama || ""} ${p.merchant_name || ""} ${p.qris_statis || ""}`
+  );
+
+  const activeCount = profiles.filter((p) => p.is_active).length;
+
   const resetForm = () => {
     setEditId(null);
     setForm({ nama: "", merchant: "", qris: "" });
@@ -44,17 +59,25 @@ export default function TokoSetup() {
     setPasteText("");
   };
 
-  const openNew = () => { resetForm(); setShowForm(true); };
+  const openNew = () => {
+    resetForm();
+    setShowForm(true);
+  };
 
   const openEdit = (profile) => {
     setEditId(profile.id);
-    setForm({ nama: profile.nama, merchant: profile.merchant_name || "", qris: profile.qris_statis });
+    setForm({
+      nama: profile.nama,
+      merchant: profile.merchant_name || "",
+      qris: profile.qris_statis,
+    });
     setFormPreview(null);
     setShowTextPaste(false);
     setPasteText("");
     setShowForm(true);
   };
 
+  /** Parse merchant name dari string QRIS via backend. */
   const parseMerchant = async (qris) => {
     try {
       const meta = await invoke("parse_qris", { qris });
@@ -67,11 +90,16 @@ export default function TokoSetup() {
     }
   };
 
+  /** Upload gambar QRIS → decode → isi form.qris. */
   const chooseImage = async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const { readFile } = await import("@tauri-apps/plugin-fs");
-      const selected = await open({ multiple: false, directory: false, filters: [{ name: "Gambar", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Gambar", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
       if (!selected) return;
       setDecoding(true);
       const bytes = await readFile(selected);
@@ -88,6 +116,7 @@ export default function TokoSetup() {
     }
   };
 
+  /** Terima string QRIS yang ditempel manual. */
   const usePastedText = () => {
     const cleaned = pasteText.trim();
     if (!cleaned) return addToast("Tempel string QRIS terlebih dahulu", "error");
@@ -99,6 +128,7 @@ export default function TokoSetup() {
     addToast("QRIS statis diterima", "success");
   };
 
+  /** Simpan profil baru/edit via save_qris_profile. */
   const save = async (event) => {
     event.preventDefault();
     const nama = form.nama.trim();
@@ -107,7 +137,14 @@ export default function TokoSetup() {
     if (!qris) return addToast("QRIS statis wajib diisi", "error");
     setSaving(true);
     try {
-      await invoke("save_qris_profile", { id: editId, input: { nama, merchant_name: form.merchant.trim() || null, qris_statis: qris } });
+      await invoke("save_qris_profile", {
+        id: editId,
+        input: {
+          nama,
+          merchant_name: form.merchant.trim() || null,
+          qris_statis: qris,
+        },
+      });
       addToast(editId ? "Profil diperbarui" : "Profil baru tersimpan", "success");
       setShowForm(false);
       await loadProfiles();
@@ -124,7 +161,9 @@ export default function TokoSetup() {
       await invoke("delete_qris_profile", { id });
       addToast("Profil dihapus", "success");
       loadProfiles();
-    } catch (err) { addToast(`Gagal: ${err}`, "error"); }
+    } catch (err) {
+      addToast(`Gagal: ${err}`, "error");
+    }
   };
 
   const setActive = async (id) => {
@@ -132,101 +171,172 @@ export default function TokoSetup() {
       await invoke("set_active_qris_profile", { id });
       addToast("Profil aktif diubah", "success");
       loadProfiles();
-    } catch (err) { addToast(`Gagal: ${err}`, "error"); }
+    } catch (err) {
+      addToast(`Gagal: ${err}`, "error");
+    }
   };
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>;
+  const columns = [
+    {
+      key: "profil",
+      label: "Profil",
+      render: (p) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ color: p.is_active ? "var(--color-primary)" : "var(--color-text-secondary)" }}
+          >
+            qr_code_2
+          </span>
+          <div>
+            <b>{p.nama}</b>
+            <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+              {p.merchant_name || "Merchant belum diisi"}
+            </div>
+            <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--color-text-secondary)" }}>
+              {(p.qris_statis || "").slice(0, 28)}…
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (p) => (
+        p.is_active
+          ? <StatusBadge label="Aktif" tone="success" />
+          : <StatusBadge label="Nonaktif" tone="neutral" />
+      ),
+    },
+    {
+      key: "aksi",
+      label: "",
+      align: "right",
+      render: (p) => (
+        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+          {!p.is_active && (
+            <button type="button" className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px", minHeight: 0 }} onClick={() => setActive(p.id)}>
+              Jadikan aktif
+            </button>
+          )}
+          <button type="button" className="btn-icon" onClick={() => openEdit(p)} title="Edit" aria-label={`Edit ${p.nama}`}>
+            <span className="material-symbols-outlined">edit</span>
+          </button>
+          <button type="button" className="btn-icon" onClick={() => deleteProfile(p.id)} title="Hapus" aria-label={`Hapus ${p.nama}`}>
+            <span className="material-symbols-outlined" style={{ color: "#B91C1C" }}>delete</span>
+          </button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "var(--color-accent-gradient)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: "22px", color: "#fff" }}>storefront</span>
-          </div>
-          <div>
-             <h1 className="text-headline-md">Profil QRIS Pembayaran</h1>
-             <p className="text-body-sm" style={{ color: "var(--color-text-secondary)" }}>Kelola profil QRIS statis yang digunakan untuk pembayaran pelanggan</p>
-          </div>
-        </div>
-        <button className="btn-primary" style={{ padding: "8px 14px", minHeight: 0, fontSize: "13px" }} onClick={openNew}>
-          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>add</span> Baru
+    <PageShell
+      eyebrow="PENGATURAN"
+      title="Profil QRIS Pembayaran"
+      description="Kelola profil QRIS statis. Profil aktif dipakai otomatis saat pembayaran QRIS di kasir."
+      actions={
+        <button type="button" className="btn-primary" onClick={openNew}>
+          <span className="material-symbols-outlined">add</span> Profil Baru
         </button>
-      </header>
+      }
+      stats={[
+        { label: "Total profil", value: profiles.length, icon: "qr_code_2" },
+        { label: "Aktif", value: activeCount, icon: "check_circle", tone: "#047857" },
+      ]}
+    >
+      <InfoNote icon="touch_app">
+        Klik &quot;Jadikan aktif&quot; untuk memilih QRIS yang dipakai kasir. Upload gambar QRIS atau tempel string EMV.
+      </InfoNote>
 
-      <div style={{ background: "var(--color-primary-fixed)", borderRadius: "12px", padding: "12px 14px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
-        <span className="material-symbols-outlined" style={{ color: "var(--color-primary)", fontSize: "20px" }}>touch_app</span>
-        <p style={{ fontSize: "12px", color: "var(--color-primary-container)", lineHeight: "1.5" }}>
-          Ketuk profil untuk menjadikannya QRIS aktif. Profil aktif dipakai otomatis saat pembayaran QRIS.
-        </p>
-      </div>
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari nama / merchant..."
+        onRefresh={loadProfiles}
+        loading={loading}
+        isEmpty={!loading && filtered.length === 0}
+        emptyIcon="qr_code_2"
+        emptyTitle="Belum ada profil QRIS"
+        emptyHint="Tambahkan QRIS statis untuk mulai menerima pembayaran."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(p) => p.id} />
+      </DataPanel>
 
-      {profiles.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: "52px", color: "var(--color-text-secondary)", opacity: 0.4 }}>qr_code_2</span>
-          <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginTop: "10px" }}>Belum ada profil QRIS</p>
-          <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "4px" }}>Tambahkan QRIS statis untuk mulai menerima pembayaran</p>
-          <button className="btn-primary" style={{ marginTop: "1rem" }} onClick={openNew}>Tambah Profil Pertama</button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {profiles.map((profile) => (
-            <div key={profile.id} className="card" style={{ display: "flex", alignItems: "center", gap: "12px", border: profile.is_active ? "2px solid var(--color-primary)" : "1px solid var(--color-surface-border)", cursor: "pointer", padding: "14px" }} onClick={() => !profile.is_active && setActive(profile.id)}>
-              <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: profile.is_active ? "var(--color-primary)" : "var(--color-surface-container-high)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <span className="material-symbols-outlined" style={{ fontSize: "22px", color: profile.is_active ? "#fff" : "var(--color-text-secondary)" }}>qr_code_2</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                  <strong style={{ fontSize: "14px" }}>{profile.nama}</strong>
-                  {profile.is_active && <span className="chip chip-green" style={{ padding: "2px 8px" }}>Aktif</span>}
-                </div>
-                <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: "3px" }}>
-                  {profile.merchant_name || "Nama merchant belum diisi"}
-                </p>
-                <p style={{ fontSize: "10px", color: "var(--color-text-secondary)", fontFamily: "monospace", marginTop: "2px" }}>{profile.qris_statis.slice(0, 28)}…</p>
-              </div>
-              <div style={{ display: "flex", gap: "4px", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                <button className="btn-icon" onClick={() => openEdit(profile)} title="Edit" aria-label={`Edit ${profile.nama}`}><span className="material-symbols-outlined" style={{ fontSize: "18px" }}>edit</span></button>
-                <button className="btn-icon" onClick={() => deleteProfile(profile.id)} title="Hapus" aria-label={`Hapus ${profile.nama}`}><span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-error)" }}>delete</span></button>
-              </div>
-            </div>
-          ))}
+      {!loading && profiles.length === 0 && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button type="button" className="btn-primary" onClick={openNew}>Tambah Profil Pertama</button>
         </div>
       )}
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-              <div>
-                <h2 className="text-headline-sm">{editId ? "Edit Profil QRIS" : "Tambah Profil QRIS"}</h2>
-                <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "2px" }}>Simpan QRIS statis untuk digunakan di kasir</p>
-              </div>
-              <button className="btn-icon" onClick={() => setShowForm(false)} aria-label="Tutup"><span className="material-symbols-outlined">close</span></button>
+        <FormModal
+          title={editId ? "Edit Profil QRIS" : "Tambah Profil QRIS"}
+          description="Simpan QRIS statis untuk digunakan di kasir. Merchant bisa terisi otomatis dari parse QRIS."
+          onClose={() => setShowForm(false)}
+          onSubmit={save}
+          submitLabel={editId ? "Simpan Perubahan" : "Simpan Profil"}
+          submitting={saving || decoding}
+        >
+          <label className="input-label">Nama Profil *</label>
+          <input
+            className="input-field"
+            value={form.nama}
+            onChange={(e) => setForm((p) => ({ ...p, nama: e.target.value }))}
+            placeholder="Contoh: QRIS Toko Utama"
+            autoFocus
+          />
+          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginBottom: 12 }}>
+            Nama internal untuk membedakan profil
+          </p>
+
+          <label className="input-label">Nama Merchant</label>
+          <input
+            className="input-field"
+            value={form.merchant}
+            onChange={(e) => setForm((p) => ({ ...p, merchant: e.target.value }))}
+            placeholder="Otomatis terisi dari QRIS"
+          />
+
+          <label className="input-label" style={{ marginTop: 12 }}>QRIS Statis *</label>
+          {form.qris && (
+            <div style={{ margin: "6px 0" }}>
+              <StatusBadge label="QRIS siap disimpan" tone="success" />
             </div>
-            <form onSubmit={save}>
-              <label style={{ display: "block", marginBottom: "14px" }}>
-                <span className="input-label">Nama Profil *</span>
-                <input className="input-field" value={form.nama} onChange={(e) => setForm((p) => ({ ...p, nama: e.target.value }))} placeholder="Contoh: QRIS Toko Utama" autoFocus />
-                <span style={{ display: "block", fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "4px" }}>Nama internal untuk membedakan profil</span>
-              </label>
-              <label style={{ display: "block", marginBottom: "14px" }}>
-                <span className="input-label">Nama Merchant</span>
-                <input className="input-field" value={form.merchant} onChange={(e) => setForm((p) => ({ ...p, merchant: e.target.value }))} placeholder="Otomatis terisi dari QRIS" />
-              </label>
-              <div style={{ marginBottom: "16px" }}>
-                <span className="input-label">QRIS Statis *</span>
-                {form.qris && <div style={{ background: "rgba(16, 185, 129, 0.1)", borderRadius: "8px", padding: "8px 10px", margin: "6px 0", display: "flex", gap: "6px", alignItems: "center" }}><span className="material-symbols-outlined" style={{ fontSize: "16px", color: "var(--color-income-green)" }}>check_circle</span><span style={{ fontSize: "11px", color: "var(--color-income-green)" }}>QRIS siap disimpan</span></div>}
-                <button type="button" className="btn-secondary" style={{ width: "100%", marginTop: "6px", fontSize: "13px" }} onClick={chooseImage} disabled={decoding}><span className="material-symbols-outlined" style={{ fontSize: "18px" }}>add_photo_alternate</span>{decoding ? "Membaca QR…" : "Upload Gambar QRIS"}</button>
-                <button type="button" className="btn-secondary" style={{ width: "100%", marginTop: "6px", fontSize: "13px" }} onClick={() => setShowTextPaste((v) => !v)}><span className="material-symbols-outlined" style={{ fontSize: "18px" }}>content_paste</span>{showTextPaste ? "Tutup Paste Teks" : "Paste String QRIS"}</button>
-                {showTextPaste && <div style={{ marginTop: "8px" }}><textarea className="input-field" rows={3} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Tempel string QRIS (0002010102...)" style={{ fontFamily: "monospace", fontSize: "11px" }} /><button type="button" className="btn-primary" style={{ width: "100%", marginTop: "6px", fontSize: "13px" }} onClick={usePastedText}>Gunakan String Ini</button></div>}
-                {formPreview && <img src={formPreview} alt="Preview QRIS" style={{ display: "block", width: "96px", height: "96px", objectFit: "contain", margin: "10px auto 0", borderRadius: "8px" }} />}
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}><button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowForm(false)}>Batal</button><button type="submit" className="btn-primary" style={{ flex: 2 }} disabled={saving || decoding || !form.nama.trim() || !form.qris.trim()}>{saving ? <span className="spinner" style={{ width: "16px", height: "16px" }} /> : <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>save</span>}{editId ? " Simpan Perubahan" : " Simpan Profil"}</button></div>
-            </form>
-          </div>
-        </div>
+          )}
+          <button type="button" className="btn-secondary" style={{ width: "100%", marginTop: 6 }} onClick={chooseImage} disabled={decoding}>
+            <span className="material-symbols-outlined">add_photo_alternate</span>
+            {decoding ? "Membaca QR…" : "Upload Gambar QRIS"}
+          </button>
+          <button type="button" className="btn-secondary" style={{ width: "100%", marginTop: 6 }} onClick={() => setShowTextPaste((v) => !v)}>
+            <span className="material-symbols-outlined">content_paste</span>
+            {showTextPaste ? "Tutup Paste Teks" : "Paste String QRIS"}
+          </button>
+          {showTextPaste && (
+            <div style={{ marginTop: 8 }}>
+              <textarea
+                className="input-field"
+                rows={3}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Tempel string QRIS (0002010102...)"
+                style={{ fontFamily: "monospace", fontSize: 11 }}
+              />
+              <button type="button" className="btn-primary" style={{ width: "100%", marginTop: 6 }} onClick={usePastedText}>
+                Gunakan String Ini
+              </button>
+            </div>
+          )}
+          {formPreview && (
+            <img
+              src={formPreview}
+              alt="Preview QRIS"
+              style={{ display: "block", width: 96, height: 96, objectFit: "contain", margin: "10px auto 0", borderRadius: 8 }}
+            />
+          )}
+        </FormModal>
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -1,11 +1,10 @@
+use crate::db::DbState;
 /// Transaction number settings and generator
 /// Generates unique formatted numbers per transaction type with optional monthly/yearly reset
-
 use chrono::{Datelike, Local};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use crate::db::DbState;
 
 #[derive(Debug, Serialize)]
 pub struct NomorSetting {
@@ -33,18 +32,21 @@ pub fn list_nomor_settings(state: State<DbState>) -> Result<Vec<NomorSetting>, S
         "SELECT id, tipe, prefix, digit_run, current_number, reset_period FROM nomor_settings ORDER BY tipe ASC"
     ).map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok(NomorSetting {
-            id: row.get(0)?,
-            tipe: row.get(1)?,
-            prefix: row.get(2)?,
-            digit_run: row.get(3)?,
-            current_number: row.get(4)?,
-            reset_period: row.get(5)?,
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(NomorSetting {
+                id: row.get(0)?,
+                tipe: row.get(1)?,
+                prefix: row.get(2)?,
+                digit_run: row.get(3)?,
+                current_number: row.get(4)?,
+                reset_period: row.get(5)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Update prefix/digit/reset setting for one transaction type
@@ -64,7 +66,8 @@ pub fn update_nomor_setting(
     conn.execute(
         "UPDATE nomor_settings SET prefix = ?1, digit_run = ?2, reset_period = ?3 WHERE tipe = ?4",
         params![req.prefix, req.digit_run, req.reset_period, req.tipe],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -104,5 +107,11 @@ pub fn generate_nomor(state: State<DbState>, tipe: String) -> Result<String, Str
     ).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
 
-    Ok(format!("{}{}{:0width$}", prefix, now.format("%Y%m"), next, width = digit_run as usize))
+    Ok(format!(
+        "{}{}{:0width$}",
+        prefix,
+        now.format("%Y%m"),
+        next,
+        width = digit_run as usize
+    ))
 }

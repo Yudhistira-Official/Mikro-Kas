@@ -19,7 +19,7 @@ pub fn hitung_diskon_bertingkat(harga: f64, lapisan: Vec<f64>) -> Result<f64, St
 pub fn get_harga_jual(
     state: State<DbState>,
     produk_id: i64,
-    _qty: i64,
+    _qty: Option<i64>,
     _level_id: Option<i64>,
     satuan: Option<String>,
 ) -> Result<f64, String> {

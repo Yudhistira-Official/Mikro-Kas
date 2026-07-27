@@ -1,56 +1,82 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import { InfoNote, PageShell, rupiah, StatusBadge } from "../components/PageKit";
+import SearchSelect from "../components/SearchSelect";
 
-const rupiah = (n) => "Rp " + Number(n || 0).toLocaleString("id-ID");
+const MAX_QUANTITY = Number.MAX_SAFE_INTEGER;
 
-/**
- * Cashbox — kelola saldo kas lokal + mutasi per cashbox.
- *
- * Flow:
- * - Load semua cashbox + semua mutasi saat mount
- * - Stats: jumlah cashbox, total saldo gabungan
- * - Tabel daftar cashbox; klik baris buka modal mutasi
- * - Form buat cashbox baru
- * - Modal mutasi: tampilkan histori per cashbox + form input mutasi
- */
+const safeTotal = (rows, quantityKey) => rows.reduce((sum, row) => {
+  const quantity = Number(row[quantityKey] || 0);
+  const subtotal = quantity * Number(row.denom);
+  return Number.isSafeInteger(quantity) && Number.isSafeInteger(subtotal) && Number.isSafeInteger(sum + subtotal) ? sum + subtotal : NaN;
+}, 0);
+export const totalAwal = (rows) => safeTotal(rows, "qtyAwal");
+export const totalAkhir = (rows) => safeTotal(rows, "qtyAkhir");
+export const variance = (actual, pos) => Number.isSafeInteger(Number(actual)) && Number.isSafeInteger(Number(pos)) && Number.isSafeInteger(Number(actual) - Number(pos)) ? Number(actual) - Number(pos) : NaN;
+const displayRupiah = (value) => Number.isSafeInteger(Number(value)) ? rupiah(value) : "—";
+
+const parseQuantity = (value) => {
+  const text = String(value ?? "");
+  if (text === "") return { value: 0, error: "" };
+  if (!/^\d+$/.test(text)) return { value: 0, error: "Jumlah harus bilangan bulat non-negatif." };
+  const number = Number(text);
+  if (!Number.isSafeInteger(number) || number > MAX_QUANTITY) return { value: 0, error: "Jumlah terlalu besar." };
+  return { value: number, error: "" };
+};
+
+const formatShiftDate = (value) => value ? new Date(String(value).replace(" ", "T") + (String(value).includes("Z") ? "" : "Z")).toLocaleDateString("id-ID") : "—";
+const formatShiftTime = (value) => value ? new Date(String(value).replace(" ", "T") + (String(value).includes("Z") ? "" : "Z")).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—";
+
 export default function Cashbox() {
   const { addToast } = useToast();
-
-  /** Daftar semua cashbox */
-  const [list, setList] = useState([]);
-  /** Semua mutasi (difilter per cashbox saat modal terbuka) */
+  const [shifts, setShifts] = useState([]);
+  const [cashboxes, setCashboxes] = useState([]);
   const [mutasiAll, setMutasiAll] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  /** Cashbox yang sedang dibuka modal mutasinya */
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get("shift") || "");
   const [selectedBox, setSelectedBox] = useState(null);
-
-  /** Kontrol visibilitas form buat cashbox */
   const [showCreate, setShowCreate] = useState(false);
-  /** Nama cashbox baru */
   const [boxNama, setBoxNama] = useState("");
-
-  /** Form mutasi (tambah/kurang/pindah) */
-  const [mutasiForm, setMutasiForm] = useState({
-    tipe: "tambah", jumlah: "", dari_cashbox_id: "", keterangan: ""
-  });
-
-  /** Search di tabel cashbox */
+  const [mutasiForm, setMutasiForm] = useState({ tipe: "tambah", jumlah: "", dari_cashbox_id: "", keterangan: "" });
   const [query, setQuery] = useState("");
+  const [sheet, setSheet] = useState(null);
+  const [closingQty, setClosingQty] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [shiftLoadError, setShiftLoadError] = useState("");
 
-  /** Load semua data cashbox + mutasi */
-  const load = async () => {
+  const activeShift = shifts.find((shift) => shift.status === "open") || null;
+  const selectedShift = shifts.find((shift) => String(shift.id) === String(selectedId)) || activeShift;
+  const legacyFallback = Boolean(sheet) && sheet.has_pecahan === false;
+  const editable = selectedShift?.status === "open";
+
+  const load = async (requestedId = selectedId) => {
     setLoading(true);
     try {
-      const [cbData, mutData] = await Promise.all([
+      const [shiftResult, boxResult, mutasiResult] = await Promise.allSettled([
+        invoke("list_shift", {}),
         invoke("list_cashbox"),
-        invoke("list_cashbox_mutasi", { cashbox_id: null })
+        invoke("list_cashbox_mutasi", { cashbox_id: null }),
       ]);
-      setList(cbData || []);
-      setMutasiAll(mutData || []);
-    } catch (e) {
-      addToast(String(e), "error");
+      const nextShifts = shiftResult.status === "fulfilled" ? (shiftResult.value || []) : [];
+      setShiftLoadError(shiftResult.status === "rejected" ? "Tidak berwenang memuat riwayat shift." : "");
+      setShifts(nextShifts);
+      setCashboxes(boxResult.status === "fulfilled" ? (boxResult.value || []) : []);
+      setMutasiAll(mutasiResult.status === "fulfilled" ? (mutasiResult.value || []) : []);
+      const nextId = requestedId && nextShifts.some((shift) => String(shift.id) === String(requestedId))
+        ? requestedId
+        : String((nextShifts.find((shift) => shift.status === "open") || nextShifts[0])?.id || "");
+      setSelectedId(nextId);
+      if (nextId) {
+        const nextSheet = await invoke("get_shift_cash_count", { shiftId: Number(nextId) });
+        setSheet(nextSheet);
+        setClosingQty(Object.fromEntries((nextSheet.rows || []).map((row) => [row.denom + (row.is_koin ? "-coin" : "-bill"), String(row.qty_akhir ?? 0)])));
+      } else {
+        setSheet(null);
+        setClosingQty({});
+      }
+    } catch (error) {
+      addToast(`Gagal memuat lembar kas: ${error}`, "error");
     } finally {
       setLoading(false);
     }
@@ -58,373 +84,163 @@ export default function Cashbox() {
 
   useEffect(() => { load(); }, []);
 
-  /** Total saldo semua cashbox */
-  const totalSaldo = useMemo(
-    () => list.reduce((sum, cb) => sum + Number(cb.saldo || 0), 0),
-    [list]
-  );
+  useEffect(() => {
+    if (!selectedShift || selectedShift.status !== "open") return undefined;
+    let cancelled = false;
+    const refreshSummary = async () => {
+      try {
+        const nextSheet = await invoke("get_shift_cash_count", { shiftId: Number(selectedShift.id) });
+        if (!cancelled) setSheet((current) => ({ ...nextSheet, rows: current?.rows || nextSheet.rows }));
+      } catch (error) {
+        if (!cancelled) console.error("Failed to refresh shift summary:", error);
+      }
+    };
+    const intervalId = window.setInterval(refreshSummary, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [selectedShift?.id, selectedShift?.status]);
 
-  /** Filter tabel cashbox berdasarkan query search */
-  const filteredList = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return list;
-    return list.filter((cb) => cb.nama.toLowerCase().includes(term));
-  }, [list, query]);
-
-  /**
-   * Mutasi cashbox terpilih untuk ditampilkan di modal.
-   * Filter dari mutasiAll berdasarkan cashbox_id aktif.
-   */
-  const mutasiSelected = useMemo(() => {
-    if (!selectedBox) return [];
-    return mutasiAll.filter((m) => m.cashbox_id === selectedBox.id);
-  }, [mutasiAll, selectedBox]);
-
-  /** Buat cashbox baru */
-  const createBox = async (e) => {
-    e.preventDefault();
+  const createBox = async (event) => {
+    event.preventDefault();
     if (!boxNama.trim()) return addToast("Nama kas wajib diisi", "error");
-    try {
-      await invoke("create_cashbox", { nama: boxNama.trim() });
-      addToast("Cashbox baru dibuat", "success");
-      setBoxNama("");
-      setShowCreate(false);
-      load();
-    } catch (err) {
-      addToast(String(err), "error");
-    }
+    try { await invoke("create_cashbox", { nama: boxNama.trim() }); setBoxNama(""); setShowCreate(false); await load(); addToast("Cashbox baru dibuat", "success"); } catch (error) { addToast(String(error), "error"); }
   };
 
-  /**
-   * Submit mutasi kas (tambah/kurang/pindah).
-   * Validasi: jumlah > 0, kas asal wajib saat tipe "pindah".
-   */
-  const handleMutasi = async (e) => {
-    e.preventDefault();
+  const handleMutasi = async (event) => {
+    event.preventDefault();
     const jumlah = Number(mutasiForm.jumlah);
-    if (!jumlah || jumlah <= 0) return addToast("Jumlah harus > 0", "error");
+    if (!Number.isSafeInteger(jumlah) || jumlah <= 0) return addToast("Jumlah harus bilangan bulat lebih dari 0", "error");
     if (!selectedBox) return addToast("Pilih cashbox terlebih dahulu", "error");
-    if (mutasiForm.tipe === "pindah" && !mutasiForm.dari_cashbox_id) {
-      return addToast("Kas asal wajib dipilih", "error");
-    }
+    if (mutasiForm.tipe === "pindah" && !mutasiForm.dari_cashbox_id) return addToast("Cashbox asal wajib diisi", "error");
     try {
-      await invoke("mutasi_cashbox", {
-        input: {
-          cashbox_id: selectedBox.id,
-          tipe: mutasiForm.tipe,
-          jumlah,
-          dari_cashbox_id: mutasiForm.tipe === "pindah"
-            ? Number(mutasiForm.dari_cashbox_id)
-            : null,
-          keterangan: mutasiForm.keterangan.trim() || null
-        }
-      });
-      addToast("Mutasi kas berhasil", "success");
+      await invoke("mutasi_cashbox", { input: { cashbox_id: selectedBox.id, tipe: mutasiForm.tipe, jumlah, dari_cashbox_id: mutasiForm.tipe === "pindah" ? Number(mutasiForm.dari_cashbox_id) : null, keterangan: mutasiForm.keterangan.trim() || null } });
       setMutasiForm({ tipe: "tambah", jumlah: "", dari_cashbox_id: "", keterangan: "" });
-      const [cbData, mutData] = await Promise.all([
-        invoke("list_cashbox"),
-        invoke("list_cashbox_mutasi", { cashbox_id: null })
-      ]);
-      setList(cbData || []);
-      setMutasiAll(mutData || []);
-      // Sync saldo di selectedBox
-      const updated = (cbData || []).find((cb) => cb.id === selectedBox.id);
-      if (updated) setSelectedBox(updated);
-    } catch (err) {
-      addToast(String(err), "error");
+      await load();
+      setSelectedBox((current) => (cashboxes.find((box) => box.id === current?.id) || current));
+      addToast("Mutasi kas berhasil", "success");
+    } catch (error) { addToast(String(error), "error"); }
+  };
+
+  const filteredCashboxes = cashboxes.filter((box) => box.nama.toLowerCase().includes(query.trim().toLowerCase()));
+  const selectedMutasi = mutasiAll.filter((item) => item.cashbox_id === selectedBox?.id);
+  const handleSelect = async (value) => {
+    setSelectedId(value);
+    await load(value);
+  };
+
+  const rows = useMemo(() => (sheet?.rows || []).map((row) => {
+    const key = row.denom + (row.is_koin ? "-coin" : "-bill");
+    const parsed = parseQuantity(closingQty[key]);
+    return { ...row, key, qtyAwal: Number(row.qty_awal || 0), qtyAkhir: parsed.value, rawAkhir: closingQty[key] ?? "", error: parsed.error };
+  }), [sheet, closingQty]);
+
+  const totals = useMemo(() => {
+    const calculatedAwal = totalAwal(rows);
+    const calculatedAkhir = totalAkhir(rows);
+    const awal = legacyFallback ? Number(sheet?.total_awal || 0) : calculatedAwal;
+    const akhir = legacyFallback ? Number(sheet?.total_akhir || 0) : calculatedAkhir;
+    const sales = Number(sheet?.total_penjualan || 0);
+    const expenses = Number(sheet?.total_pengeluaran || 0);
+    const actualIncome = Number.isSafeInteger(akhir) && Number.isSafeInteger(awal) && Number.isSafeInteger(expenses) && Number.isSafeInteger(akhir - awal + expenses) ? akhir - awal + expenses : NaN;
+    return { awal, akhir, sales, expenses, actualIncome, variance: variance(actualIncome, sales) };
+  }, [rows, selectedShift, sheet, legacyFallback]);
+
+  const quantityError = rows.find((row) => row.error)?.error || "";
+  const totalError = !Number.isSafeInteger(totals.akhir) || !Number.isSafeInteger(totals.actualIncome) || !Number.isSafeInteger(totals.variance) ? "Total hitungan kas terlalu besar." : "";
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!editable || !selectedShift || quantityError || totalError) return addToast(quantityError || totalError, "error");
+    setSaving(true);
+    try {
+      await invoke("tutup_shift", {
+        id: selectedShift.id,
+        saldo_akhir: totals.akhir,
+        rows: legacyFallback ? null : rows.map(({ denom, is_koin, qtyAwal, qtyAkhir }) => ({ denom, is_koin, qty_awal: qtyAwal, qty_akhir: qtyAkhir })),
+        catatan: null,
+      });
+      addToast("Shift berhasil ditutup", "success");
+      await load(String(selectedShift.id));
+    } catch (error) {
+      addToast(`Gagal menyimpan hitungan kas: ${error}`, "error");
+    } finally {
+      setSaving(false);
     }
   };
 
-  /** Warna badge berdasarkan tipe mutasi */
-  const mutasiBadge = (tipe) => {
-    if (tipe === "tambah") return "badge badge-success";
-    if (tipe === "kurang") return "badge badge-error";
-    return "badge badge-warning";
-  };
+  const boxName = cashboxes.find((box) => String(box.id) === String(selectedShift?.cashbox_id))?.nama;
+  const shiftOptions = shifts.map((shift) => ({
+    value: String(shift.id),
+    label: `${shift.nama} · ${shift.status === "open" ? "Aktif" : "Ditutup"} · ${formatShiftDate(shift.opened_at)}`,
+  }));
 
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">KAS & KEUANGAN</p>
-          <h1 className="text-headline-lg">Cashbox</h1>
-          <p className="text-body-md sales-page__subtitle">
-            Kelola saldo kas lokal dan riwayat mutasi setiap cashbox.
-          </p>
-        </div>
-        <button className="btn-primary sales-page__add" onClick={() => setShowCreate((v) => !v)}>
-          <span className="material-symbols-outlined">add</span>
-          Buat Cashbox
-        </button>
-      </header>
-
-      {/* Stats */}
-      <section className="sales-stats">
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">account_balance_wallet</span>
-          <div>
-            <span>Total Cashbox</span>
-            <strong>{list.length}</strong>
-          </div>
-        </div>
-        <div className="sales-stat-card">
-          <span className="material-symbols-outlined">payments</span>
-          <div>
-            <span>Total Saldo</span>
-            <strong>{rupiah(totalSaldo)}</strong>
-          </div>
-        </div>
+    <PageShell
+      eyebrow="KAS & KEUANGAN"
+      title="Cash Box Count Sheet"
+      description="Hitung kas fisik, rekonsiliasi penjualan POS, dan tutup shift aktif."
+      actions={<><button className="btn-secondary" type="button" onClick={() => load()} disabled={loading}><span className="material-symbols-outlined">refresh</span>Refresh</button><button className="btn-primary" type="button" onClick={() => setShowCreate((value) => !value)}>Buat Cashbox</button></>}
+      stats={[
+        { label: "Saldo Awal", value: displayRupiah(totals.awal), icon: "input" },
+        { label: "Kas Fisik Akhir", value: displayRupiah(totals.akhir), icon: "payments" },
+        { label: "Selisih", value: rupiah(totals.variance), icon: "compare_arrows", tone: totals.variance === 0 ? "var(--color-income-green)" : "var(--color-expense-red)" },
+      ]}
+    >
+      {showCreate && <section className="sales-panel" style={{ padding: "1.25rem" }}><form onSubmit={createBox} style={{ display: "flex", gap: 8 }}><input className="input-field" placeholder="Nama cashbox" value={boxNama} onChange={(event) => setBoxNama(event.target.value)} /><button className="btn-primary" type="submit">Simpan</button></form></section>}
+      <section className="sales-panel" style={{ padding: "1.25rem" }}><div className="sales-panel__toolbar"><input className="input-field" placeholder="Cari cashbox" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Cashbox</th><th>Saldo</th><th>Aksi</th></tr></thead><tbody>{filteredCashboxes.map((box) => <tr key={box.id}><td>{box.nama}</td><td>{rupiah(box.saldo)}</td><td><button className="btn-secondary" type="button" onClick={() => setSelectedBox(box)}>Mutasi</button></td></tr>)}</tbody></table></div></section>
+      {selectedBox && <div className="modal-overlay" onClick={() => setSelectedBox(null)}><div className="modal-content sales-form-modal" onClick={(event) => event.stopPropagation()}><h2 className="text-headline-sm">{selectedBox.nama}</h2><form className="sales-form" onSubmit={handleMutasi}><select className="input-field" value={mutasiForm.tipe} onChange={(event) => setMutasiForm({ ...mutasiForm, tipe: event.target.value })}><option value="tambah">Tambah</option><option value="kurang">Kurang</option><option value="pindah">Pindah</option></select>{mutasiForm.tipe === "pindah" && <select className="input-field" value={mutasiForm.dari_cashbox_id} onChange={(event) => setMutasiForm({ ...mutasiForm, dari_cashbox_id: event.target.value })}><option value="">Pilih asal</option>{cashboxes.filter((box) => box.id !== selectedBox.id).map((box) => <option key={box.id} value={box.id}>{box.nama}</option>)}</select>}<input className="input-field" inputMode="numeric" value={mutasiForm.jumlah} onChange={(event) => setMutasiForm({ ...mutasiForm, jumlah: event.target.value })} placeholder="Jumlah" /><input className="input-field" value={mutasiForm.keterangan} onChange={(event) => setMutasiForm({ ...mutasiForm, keterangan: event.target.value })} placeholder="Keterangan" /><button className="btn-primary" type="submit">Kirim Mutasi</button><div>{selectedMutasi.map((item) => <p key={item.id}>{item.tipe}: {rupiah(item.jumlah)}</p>)}</div></form></div></div>}
+      {shiftLoadError && <InfoNote icon="lock">{shiftLoadError} Fungsi cashbox dan mutasi tetap tersedia.</InfoNote>}
+      <section className="sales-panel" style={{ padding: "1.25rem" }}>
+        <label className="input-label" htmlFor="cashbox-shift">Pilih shift</label>
+        <SearchSelect id="cashbox-shift" value={selectedId} onChange={handleSelect} options={shiftOptions} placeholder="Pilih riwayat shift" disabled={loading} />
       </section>
 
-      {/* Form buat cashbox — inline collapsible */}
-      {showCreate && (
-        <section className="sales-panel">
-          <div className="sales-panel__toolbar">
-            <span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>
-              add_circle
-            </span>
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Buat Cashbox Baru</span>
-          </div>
-          <form onSubmit={createBox} style={{ padding: "16px", display: "flex", gap: "10px", alignItems: "flex-end" }}>
-            <label style={{ flex: 1 }}>
-              Nama Cashbox *
-              <input
-                className="input-field"
-                placeholder="Mis: Kas Utama, Kas Cabang"
-                value={boxNama}
-                onChange={(e) => setBoxNama(e.target.value)}
-                autoFocus
-              />
-            </label>
-            <button className="btn-primary" type="submit">Simpan</button>
-            <button className="btn-secondary" type="button" onClick={() => setShowCreate(false)}>
-              Batal
-            </button>
+      {loading ? <div className="loading-page"><div className="spinner" /><span>Memuat lembar kas…</span></div> : !selectedShift ? (
+        <div className="empty-state"><span className="material-symbols-outlined">point_of_sale</span><h3>Belum ada shift</h3><p>Buka shift dari halaman Shift untuk mulai menghitung kas.</p></div>
+      ) : (
+        <>
+          <section className="sales-panel" style={{ padding: "1.25rem" }}>
+            <div className="sales-panel__toolbar"><div><p className="sales-page__eyebrow">INFORMASI SHIFT</p><h2 className="text-headline-sm">{selectedShift.nama}</h2></div><StatusBadge label={editable ? "SHIFT AKTIF" : "SHIFT DITUTUP"} tone={editable ? "success" : "neutral"} /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
+              <div><span className="text-label-md">Tanggal</span><strong style={{ display: "block", marginTop: 4 }}>{formatShiftDate(selectedShift.opened_at)}</strong></div>
+              <div><span className="text-label-md">Kasir</span><strong style={{ display: "block", marginTop: 4 }}>{selectedShift.kasir_nama || "—"}</strong></div>
+              <div><span className="text-label-md">Register / Box</span><strong style={{ display: "block", marginTop: 4 }}>{boxName || selectedShift.cashbox_id || "—"}</strong></div>
+              <div><span className="text-label-md">Periode</span><strong style={{ display: "block", marginTop: 4 }}>{formatShiftTime(selectedShift.opened_at)} — {selectedShift.closed_at ? formatShiftTime(selectedShift.closed_at) : "sekarang"}</strong></div>
+            </div>
+          </section>
+
+          <form onSubmit={handleSubmit}>
+          <section className="sales-panel" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="sales-panel__toolbar" style={{ padding: "1.25rem" }}><div><p className="sales-page__eyebrow">HITUNG FISIK</p><h2 className="text-headline-sm">Denominasi Kas</h2></div></div>
+            <div className="sales-table-wrap">
+              <table className="sales-table"><thead><tr><th>Pecahan</th><th>Awal</th><th>Subtotal Awal</th><th>Akhir</th><th>Subtotal Akhir</th></tr></thead><tbody>
+                {rows.map((row) => <tr key={row.key}><td>{rupiah(row.denom)} {row.is_koin ? "(koin)" : ""}</td><td>{row.qtyAwal}</td><td>{rupiah(row.denom * row.qtyAwal)}</td><td>{editable ? <input className="input-field" type="number" min="0" step="1" style={{ maxWidth: 110, borderColor: row.error ? "var(--color-expense-red)" : undefined }} inputMode="numeric" value={row.rawAkhir} onChange={(event) => setClosingQty((current) => ({ ...current, [row.key]: event.target.value }))} aria-invalid={Boolean(row.error)} aria-label={`Jumlah akhir ${row.denom}`} /> : row.qtyAkhir}</td><td>{rupiah(row.denom * row.qtyAkhir)}</td></tr>)}
+                 <tr><th>Total</th><th>{legacyFallback ? "—" : rows.reduce((sum, row) => sum + row.qtyAwal, 0)}</th><th>{displayRupiah(totals.awal)}</th><th>{legacyFallback ? "—" : rows.reduce((sum, row) => sum + row.qtyAkhir, 0)}</th><th>{displayRupiah(totals.akhir)}</th></tr>
+              </tbody></table>
+            </div>
+            {quantityError && <p role="alert" style={{ color: "var(--color-expense-red)", padding: "0 1.25rem 1.25rem", margin: 0 }}>{quantityError}</p>}
+          </section>
+
+          <section className="sales-panel" style={{ padding: "1.25rem" }}>
+            <p className="sales-page__eyebrow">REKONSILIASI</p><h2 className="text-headline-sm" style={{ marginBottom: 16 }}>Ringkasan Kas</h2>
+             <div style={{ display: "grid", gap: 10 }}>
+               <div style={{ display: "flex", justifyContent: "space-between" }}><span>Fisik final</span><strong>{displayRupiah(totals.akhir)}</strong></div>
+               <div style={{ display: "flex", justifyContent: "space-between" }}><span>Kas awal</span><strong>{displayRupiah(totals.awal)}</strong></div>
+               <div style={{ display: "flex", justifyContent: "space-between" }}><span>Pendapatan aktual</span><strong>{rupiah(totals.actualIncome)}</strong></div>
+               <div style={{ display: "flex", justifyContent: "space-between" }}><span>Penjualan POS tunai</span><strong>{rupiah(totals.sales)}</strong></div>
+               <div style={{ display: "flex", justifyContent: "space-between", color: totals.variance === 0 ? "var(--color-income-green)" : "var(--color-expense-red)" }}><span>Varians</span><strong>{displayRupiah(totals.variance)}</strong></div>
+             </div>
+             {legacyFallback && <InfoNote icon="lock">Shift legacy tanpa snapshot denominasi. Total fallback ditampilkan readonly.</InfoNote>}
+             {editable && <button className="btn-primary" type="submit" disabled={saving || Boolean(quantityError)} style={{ width: "100%", marginTop: 20 }}>{saving ? "Menyimpan…" : "Simpan & Tutup Shift"}</button>}
+           </section>
           </form>
-        </section>
+
+        </>
       )}
-
-      {/* Tabel cashbox */}
-      <section className="sales-panel">
-        <div className="sales-panel__toolbar">
-          <div className="sales-search">
-            <span className="material-symbols-outlined">search</span>
-            <input
-              placeholder="Cari cashbox…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <button className="btn-secondary" onClick={load} style={{ flexShrink: 0 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>refresh</span>
-          </button>
-        </div>
-
-        {loading ? (
-          <div style={{ padding: "32px", textAlign: "center", color: "var(--color-text-secondary)" }}>
-            Memuat…
-          </div>
-        ) : (
-          <div className="sales-table-wrap">
-            <table className="sales-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Nama Cashbox</th>
-                  <th>Saldo</th>
-                  <th>Dibuat</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredList.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: "32px", color: "var(--color-text-secondary)" }}>
-                      {query ? "Tidak ada cashbox yang cocok." : "Belum ada cashbox. Buat cashbox baru di atas."}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredList.map((cb, i) => (
-                    <tr key={cb.id} style={{ cursor: "pointer" }} onClick={() => {
-                      setSelectedBox(cb);
-                      setMutasiForm({ tipe: "tambah", jumlah: "", dari_cashbox_id: "", keterangan: "" });
-                    }}>
-                      <td style={{ color: "var(--color-text-secondary)" }}>{i + 1}</td>
-                      <td style={{ fontWeight: 600 }}>{cb.nama}</td>
-                      <td style={{ color: cb.saldo >= 0 ? "var(--color-primary)" : "var(--color-expense-red)", fontWeight: 700 }}>
-                        {rupiah(cb.saldo)}
-                      </td>
-                      <td style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>
-                        {cb.created_at?.slice(0, 10)}
-                      </td>
-                      <td>
-                        <button
-                          className="btn-secondary"
-                          style={{ fontSize: 12, padding: "4px 10px" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedBox(cb);
-                            setMutasiForm({ tipe: "tambah", jumlah: "", dari_cashbox_id: "", keterangan: "" });
-                          }}
-                        >
-                          Mutasi
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* Modal mutasi per cashbox */}
-      {selectedBox && (
-        <div
-          className="modal-overlay"
-          onClick={() => setSelectedBox(null)}
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 100, padding: "24px"
-          }}
-        >
-          <div
-            className="sales-panel"
-            style={{ width: "100%", maxWidth: 560, maxHeight: "85vh", overflow: "auto", borderRadius: 18 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header modal */}
-            <div className="sales-panel__toolbar" style={{ justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span className="material-symbols-outlined" style={{ color: "var(--color-primary)" }}>
-                  account_balance_wallet
-                </span>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{selectedBox.nama}</div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
-                    Saldo: {rupiah(selectedBox.saldo)}
-                  </div>
-                </div>
-              </div>
-              <button className="btn-icon" onClick={() => setSelectedBox(null)}>
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            {/* Form mutasi */}
-            <form onSubmit={handleMutasi} style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px", borderBottom: "1px solid var(--color-surface-border)" }}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Input Mutasi</div>
-
-              <label>
-                Tipe Mutasi
-                <select
-                  className="input-field"
-                  value={mutasiForm.tipe}
-                  onChange={(e) => setMutasiForm((p) => ({ ...p, tipe: e.target.value }))}
-                >
-                  <option value="tambah">Tambah (pemasukan)</option>
-                  <option value="kurang">Kurang (pengeluaran)</option>
-                  <option value="pindah">Pindah dari kas lain</option>
-                </select>
-              </label>
-
-              {mutasiForm.tipe === "pindah" && (
-                <label>
-                  Kas Asal *
-                  <select
-                    className="input-field"
-                    value={mutasiForm.dari_cashbox_id}
-                    onChange={(e) => setMutasiForm((p) => ({ ...p, dari_cashbox_id: e.target.value }))}
-                  >
-                    <option value="">— pilih kas asal —</option>
-                    {list
-                      .filter((cb) => cb.id !== selectedBox.id)
-                      .map((cb) => (
-                        <option key={cb.id} value={cb.id}>
-                          {cb.nama} ({rupiah(cb.saldo)})
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              )}
-
-              <label>
-                Jumlah (Rp) *
-                <input
-                  className="input-field"
-                  inputMode="numeric"
-                  placeholder="Nominal"
-                  value={mutasiForm.jumlah}
-                  onChange={(e) => setMutasiForm((p) => ({ ...p, jumlah: e.target.value.replace(/\D/g, "") }))}
-                />
-              </label>
-
-              <label>
-                Keterangan
-                <input
-                  className="input-field"
-                  placeholder="Opsional"
-                  value={mutasiForm.keterangan}
-                  onChange={(e) => setMutasiForm((p) => ({ ...p, keterangan: e.target.value }))}
-                />
-              </label>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn-primary" type="submit" style={{ flex: 1 }}>Kirim Mutasi</button>
-                <button className="btn-secondary" type="button" onClick={() => setSelectedBox(null)} style={{ flex: 1 }}>
-                  Tutup
-                </button>
-              </div>
-            </form>
-
-            {/* Histori mutasi cashbox terpilih */}
-            <div style={{ padding: "16px" }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
-                Riwayat Mutasi ({mutasiSelected.length})
-              </div>
-              {mutasiSelected.length === 0 ? (
-                <div style={{ color: "var(--color-text-secondary)", fontSize: 13 }}>
-                  Belum ada riwayat mutasi.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {mutasiSelected.map((m) => (
-                    <div
-                      key={m.id}
-                      style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "10px 12px",
-                        background: "var(--color-surface-container-low)",
-                        borderRadius: 10,
-                        fontSize: 13
-                      }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span className={mutasiBadge(m.tipe)}>{m.tipe}</span>
-                          {m.keterangan && (
-                            <span style={{ color: "var(--color-text-secondary)" }}>{m.keterangan}</span>
-                          )}
-                        </div>
-                        <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
-                          {m.tanggal?.slice(0, 16).replace("T", " ")}
-                        </span>
-                      </div>
-                      <strong style={{
-                        color: m.tipe === "tambah" ? "var(--color-primary)" : "var(--color-expense-red)"
-                      }}>
-                        {m.tipe === "tambah" ? "+" : "−"}{rupiah(m.jumlah)}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      {!editable && selectedShift && <InfoNote icon="lock">Shift ditutup. Semua hitungan hanya dapat dilihat.</InfoNote>}
+      {!activeShift && shifts.length > 0 && <InfoNote icon="info">Tidak ada shift aktif. Buka shift baru dari halaman Shift untuk mengedit hitungan kas.</InfoNote>}
+    </PageShell>
   );
 }

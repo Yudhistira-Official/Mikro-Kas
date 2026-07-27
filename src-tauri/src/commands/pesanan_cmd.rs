@@ -8,7 +8,7 @@ use rusqlite::params;
 use tauri::State;
 
 const PESANAN_SELECT: &str = "SELECT p.id, p.customer_id, c.nama, p.nama_pemesan,
-    p.total, p.dp, (p.total - p.dp) AS sisa, p.status, p.catatan, p.jatuh_tempo,
+    p.no_hp, p.total, p.dp, (p.total - p.dp) AS sisa, p.status, p.catatan, p.jatuh_tempo,
     p.created_at, p.updated_at
     FROM pesanan_customer p
     LEFT JOIN customer c ON c.id = p.customer_id";
@@ -19,14 +19,15 @@ fn map_pesanan(row: &rusqlite::Row<'_>) -> rusqlite::Result<PesananCustomer> {
         customer_id: row.get(1)?,
         customer_nama: row.get(2)?,
         nama_pemesan: row.get(3)?,
-        total: row.get(4)?,
-        dp: row.get(5)?,
-        sisa: row.get(6)?,
-        status: row.get(7)?,
-        catatan: row.get(8)?,
-        jatuh_tempo: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        no_hp: row.get(4)?,
+        total: row.get(5)?,
+        dp: row.get(6)?,
+        sisa: row.get(7)?,
+        status: row.get(8)?,
+        catatan: row.get(9)?,
+        jatuh_tempo: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -76,9 +77,17 @@ pub fn create_pesanan_customer(
     let total = input.total.max(0);
     let dp = input.dp.unwrap_or(0).max(0).min(total);
     conn.execute(
-        "INSERT INTO pesanan_customer (customer_id, nama_pemesan, total, dp, catatan, jatuh_tempo)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![input.customer_id, nama, total, dp, input.catatan, input.jatuh_tempo],
+        "INSERT INTO pesanan_customer (customer_id, nama_pemesan, no_hp, total, dp, catatan, jatuh_tempo)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            input.customer_id,
+            nama,
+            input.no_hp,
+            total,
+            dp,
+            input.catatan,
+            input.jatuh_tempo
+        ],
     )
     .map_err(|e| format!("Gagal simpan pesanan: {e}"))?;
     let id = conn.last_insert_rowid();
@@ -90,8 +99,12 @@ pub fn create_pesanan_customer(
 #[tauri::command]
 pub fn get_pesanan_customer(state: State<DbState>, id: i64) -> Result<PesananCustomer, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    conn.query_row(&format!("{} WHERE p.id = ?1", PESANAN_SELECT), params![id], map_pesanan)
-        .map_err(|_| "Pesanan tidak ditemukan".to_string())
+    conn.query_row(
+        &format!("{} WHERE p.id = ?1", PESANAN_SELECT),
+        params![id],
+        map_pesanan,
+    )
+    .map_err(|_| "Pesanan tidak ditemukan".to_string())
 }
 
 #[tauri::command]

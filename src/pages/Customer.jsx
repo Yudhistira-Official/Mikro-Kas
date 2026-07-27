@@ -13,6 +13,8 @@ import { useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import DropZoneImport from "../components/DropZoneImport";
+import RupiahInput from "../components/RupiahInput";
+import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
 
 // Helper: normalisasi nomor telepon ke format wa.me
 // "0812345678" → "62812345678" (ganti 0 depan dengan 62, hapus non-digit)
@@ -196,26 +198,44 @@ export default function Customer() {
     }
   };
 
+  // Escape key closes active modal — does not close during save operations
+  useEffect(() => {
+    /**
+     * Handles Escape keydown to close the currently open modal.
+     * Prevents closing while an import operation is in progress.
+     */
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        if (showForm) setShowForm(false);
+        else if (showImportCSV) setShowImportCSV(false);
+        else if (detailItem) setDetailItem(null);
+      }
+    };
+    if (showForm || showImportCSV || detailItem) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [showForm, showImportCSV, detailItem]);
+
   return (
-    <div className="sales-page">
-      <header className="sales-page__header">
-        <div>
-          <p className="sales-page__eyebrow">MASTER DATA</p>
-          <h1 className="text-headline-lg">Daftar Pelanggan</h1>
-          <p className="text-body-md sales-page__subtitle">Menampilkan, menambah, mengubah, dan menghapus data pelanggan / customer.</p>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
+    <PageShell
+      eyebrow="MASTER DATA"
+      title="Daftar Pelanggan"
+      description="Menampilkan, menambah, mengubah, dan menghapus data pelanggan / customer."
+      actions={
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
           <button className="btn-secondary sales-page__add" onClick={() => { setImportResult(null); setShowImportCSV(true); }}><span className="material-symbols-outlined">upload_file</span>Impor CSV</button>
           <button className="btn-primary sales-page__add" onClick={() => { setEditItem(null); setForm({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 }); setShowForm(true); }}><span className="material-symbols-outlined">person_add</span>Tambah Pelanggan</button>
-        </div>
-      </header>
-
-      <section className="sales-stats">
-        <div className="sales-stat-card"><span className="material-symbols-outlined">group</span><div><span>Total Pelanggan</span><strong>{list.length}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">credit_card</span><div><span>Punya Limit Kredit</span><strong>{list.filter(c => Number(c.limit_kredit) > 0).length}</strong></div></div>
-        <div className="sales-stat-card"><span className="material-symbols-outlined">phone</span><div><span>Punya Telepon</span><strong>{list.filter(c => c.telepon).length}</strong></div></div>
-      </section>
-
+          </div>
+        </>
+      }
+      stats={[
+        { label: "Total Pelanggan", value: list.length, icon: "group" },
+        { label: "Punya Limit Kredit", value: list.filter(c => Number(c.limit_kredit) > 0).length, icon: "credit_card" },
+        { label: "Punya Telepon", value: list.filter(c => c.telepon).length, icon: "phone" },
+      ]}
+    >
       <section className="sales-panel">
         <div className="sales-panel__toolbar">
           <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
@@ -248,8 +268,8 @@ export default function Customer() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h3 className="text-headline-md">Detail Customer</h3>
-              <button className="btn-icon" onClick={() => setDetailItem(null)}>
-                <span className="material-symbols-outlined">close</span>
+<button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setDetailItem(null)}>
+                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
@@ -341,7 +361,12 @@ export default function Customer() {
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="text-headline-md" style={{ marginBottom: "1rem" }}>{editItem ? "Edit Customer" : "Tambah Customer"}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3 className="text-headline-md" style={{ margin: 0 }}>{editItem ? "Edit Customer" : "Tambah Customer"}</h3>
+              <button type="button" className="btn-icon" aria-label="Tutup" onClick={() => { setShowForm(false); setEditItem(null); }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
             <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               <div>
                 <label className="input-label">Nama *</label>
@@ -368,13 +393,7 @@ export default function Customer() {
               </div>
               <div>
                 <label className="input-label">Limit Kredit (Rp)</label>
-                <input
-                  className="input-field"
-                  value={form.limit_kredit || 0}
-                  onChange={e => setForm(prev => ({ ...prev, limit_kredit: Number(e.target.value.replace(/\D/g, "")) || 0 }))}
-                  placeholder="500000"
-                  inputMode="numeric"
-                />
+                <RupiahInput value={form.limit_kredit || 0} onChange={(val) => setForm(prev => ({ ...prev, limit_kredit: Number(val) || 0 }))} placeholder="500000" />
                 <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>
                   Batas maksimal piutang yang diizinkan. 0 = tanpa batas.
                 </p>
@@ -392,7 +411,12 @@ export default function Customer() {
       {showImportCSV && (
         <div className="modal-overlay" onClick={() => setShowImportCSV(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
-            <h3 className="text-headline-md">Import Customer CSV</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 className="text-headline-md">Import Customer CSV</h3>
+              <button type="button" className="btn-icon" aria-label="Tutup" onClick={() => setShowImportCSV(false)}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
             <p className="text-body-md" style={{ color: "var(--color-text-secondary)", margin: "0.25rem 0 1rem" }}>Unggah daftar customer dalam format CSV.</p>
             <DropZoneImport
               title="Pilih atau Drop File CSV di sini"
@@ -416,6 +440,6 @@ export default function Customer() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

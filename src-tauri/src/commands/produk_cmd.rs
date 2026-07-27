@@ -2,12 +2,13 @@
 //! Gap KasGo Phase 1 menambah stock adjustment dengan audit trail.
 use crate::db::DbState;
 use crate::models::produk::{Produk, ProdukInput};
+use chrono::{Duration, NaiveDateTime, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 const PRODUK_SELECT: &str =
-    "SELECT p.id, p.kategori_id, k.nama, p.supplier_id, s.nama, p.nama, p.sku, p.satuan,
+    "SELECT p.id, p.kategori_id, k.nama, p.supplier_id, s.nama, p.nama, p.sku, p.kata_kunci, p.satuan,
                 p.harga_beli, p.harga_jual, p.stok, p.stok_minimum,
                 p.foto_path, COALESCE(p.harga_diskon,0), p.diskon_berlaku_sampai,
                 p.is_active, p.satuan_multi, p.created_at, p.updated_at
@@ -24,18 +25,19 @@ fn map_produk(row: &rusqlite::Row<'_>) -> rusqlite::Result<Produk> {
         supplier_nama: row.get(4)?,
         nama: row.get(5)?,
         sku: row.get(6)?,
-        satuan: row.get(7)?,
-        harga_beli: row.get(8)?,
-        harga_jual: row.get(9)?,
-        stok: row.get(10)?,
-        stok_minimum: row.get(11)?,
-        foto_path: row.get(12)?,
-        harga_diskon: row.get(13)?,
-        diskon_berlaku_sampai: row.get(14)?,
-        is_active: row.get::<_, i64>(15)? != 0,
-        satuan_multi: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        kata_kunci: row.get(7)?,
+        satuan: row.get(8)?,
+        harga_beli: row.get(9)?,
+        harga_jual: row.get(10)?,
+        stok: row.get(11)?,
+        stok_minimum: row.get(12)?,
+        foto_path: row.get(13)?,
+        harga_diskon: row.get(14)?,
+        diskon_berlaku_sampai: row.get(15)?,
+        is_active: row.get::<_, i64>(16)? != 0,
+        satuan_multi: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 
@@ -59,7 +61,10 @@ pub fn list_produk(
     }
     if let Some(ref s) = search {
         param_idx += 1;
-        sql.push_str(&format!(" AND p.nama LIKE ?{}", param_idx));
+        sql.push_str(&format!(
+            " AND (p.nama LIKE ?{} OR COALESCE(p.kata_kunci, '') LIKE ?{})",
+            param_idx, param_idx
+        ));
         param_values.push(Box::new(format!("%{}%", s)));
     }
     if let Some(kid) = kategori_id {
@@ -99,12 +104,13 @@ pub fn get_produk(state: State<DbState>, id: i64) -> Result<Produk, String> {
 pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO produk (kategori_id, supplier_id, nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum, foto_path, satuan_multi, harga_diskon, diskon_berlaku_sampai)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO produk (kategori_id, supplier_id, nama, kata_kunci, sku, satuan, harga_beli, harga_jual, stok, stok_minimum, foto_path, satuan_multi, harga_diskon, diskon_berlaku_sampai)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             input.kategori_id,
             input.supplier_id,
             input.nama,
+            input.kata_kunci,
             input.sku,
             input.satuan.unwrap_or_else(|| "pcs".to_string()),
             input.harga_beli.unwrap_or(0),
@@ -133,19 +139,19 @@ pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk
 pub fn update_produk(state: State<DbState>, id: i64, input: ProdukInput) -> Result<Produk, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE produk SET kategori_id=?1, supplier_id=?2, nama=?3, sku=?4, satuan=?5,
-         harga_beli=?6, harga_jual=?7, stok=?8, stok_minimum=?9, foto_path=?10,
+        "UPDATE produk SET kategori_id=?1, supplier_id=?2, nama=?3, kata_kunci=?4, sku=?5, satuan=?6,
+         harga_beli=?7, harga_jual=?8, stok_minimum=?9, foto_path=?10,
          satuan_multi=?11, harga_diskon=?12, diskon_berlaku_sampai=?13, updated_at=datetime('now')
          WHERE id=?14",
         params![
             input.kategori_id,
             input.supplier_id,
             input.nama,
+            input.kata_kunci,
             input.sku,
             input.satuan.unwrap_or_else(|| "pcs".to_string()),
             input.harga_beli.unwrap_or(0),
             input.harga_jual,
-            input.stok.unwrap_or(0),
             input.stok_minimum.unwrap_or(0),
             input.foto_path,
             input.satuan_multi,
@@ -209,6 +215,8 @@ pub struct StockAdjustment {
     pub stok_sesudah: i64,
     pub alasan: String,
     pub created_at: String,
+    pub reverse_of_id: Option<i64>,
+    pub is_reversed: bool,
 }
 
 /// Input penyesuaian stok: produk target, stok baru hasil opname, dan alasan wajib.
@@ -219,6 +227,26 @@ pub struct StockAdjustmentInput {
     pub produk_id: i64,
     pub stok_baru: i64,
     pub alasan: String,
+    pub admin_pin: Option<String>,
+}
+
+/// Validasi alasan penyesuaian stok: trim, min 5 char, bukan semua karakter sama.
+fn validate_alasan_stok(raw: &str) -> Result<String, String> {
+    let alasan = raw.trim().to_string();
+    if alasan.is_empty() {
+        return Err("Alasan penyesuaian stok wajib diisi".into());
+    }
+    if alasan.chars().count() < 5 {
+        return Err("Alasan minimal 5 karakter".into());
+    }
+    // Tolak "aaaaa", "-----", "11111", dll.
+    let mut chars = alasan.chars();
+    if let Some(first) = chars.next() {
+        if chars.all(|c| c == first) {
+            return Err("Alasan tidak boleh memakai karakter yang sama".into());
+        }
+    }
+    Ok(alasan)
 }
 
 /// Penyesuaian stok manual (opname/koreksi/rusak/hilang).
@@ -229,15 +257,34 @@ pub fn adjust_stock(
     state: State<DbState>,
     input: StockAdjustmentInput,
 ) -> Result<StockAdjustment, String> {
-    if input.alasan.trim().is_empty() {
-        return Err("Alasan penyesuaian stok wajib diisi".into());
-    }
+    let alasan = validate_alasan_stok(&input.alasan)?;
     if input.stok_baru < 0 {
         return Err("Stok baru tidak boleh negatif".into());
     }
-    let alasan = input.alasan.trim().to_string();
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let has_admin_pin: bool = tx
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM kasir_pin WHERE role IN ('admin', 'supervisor') AND is_active = 1)",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?
+        != 0;
+    if has_admin_pin {
+        let pin = input.admin_pin.as_deref().unwrap_or("").trim();
+        let pin_valid: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM kasir_pin WHERE pin = ?1 AND role IN ('admin', 'supervisor') AND is_active = 1)",
+                params![pin],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            != 0;
+        if !pin_valid {
+            return Err("Penyesuaian stok memerlukan PIN Admin atau Supervisor".into());
+        }
+    }
 
     let (stok_sebelum, nama): (i64, String) = tx
         .query_row(
@@ -257,7 +304,13 @@ pub fn adjust_stock(
     tx.execute(
         "INSERT INTO stock_adjustment (produk_id, selisih, stok_sebelum, stok_sesudah, alasan)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![input.produk_id, selisih, stok_sebelum, input.stok_baru, alasan.clone()],
+        params![
+            input.produk_id,
+            selisih,
+            stok_sebelum,
+            input.stok_baru,
+            alasan.clone()
+        ],
     )
     .map_err(|e| e.to_string())?;
     let id = tx.last_insert_rowid();
@@ -271,7 +324,137 @@ pub fn adjust_stock(
         stok_sebelum,
         stok_sesudah: input.stok_baru,
         alasan,
-        created_at: chrono::Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string(),
+        created_at: chrono::Utc::now()
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        reverse_of_id: None,
+        is_reversed: false,
+    })
+}
+
+fn reversal_delta(selisih: i64) -> i64 {
+    -selisih
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverseStockAdjustmentInput {
+    pub adjustment_id: i64,
+    pub admin_pin: Option<String>,
+}
+
+#[tauri::command]
+pub fn reverse_stock_adjustment(
+    state: State<DbState>,
+    input: ReverseStockAdjustmentInput,
+) -> Result<StockAdjustment, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let target: (i64, i64, String, i64, i64, i64, String, Option<i64>) = tx
+        .query_row(
+            "SELECT sa.produk_id, p.stok, p.nama, sa.selisih, sa.stok_sesudah,
+                    sa.stok_sebelum, sa.created_at, sa.reverse_of_id
+             FROM stock_adjustment sa JOIN produk p ON p.id = sa.produk_id
+             WHERE sa.id = ?1",
+            params![input.adjustment_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .map_err(|_| "Audit tidak ditemukan".to_string())?;
+    if target.7.is_some() {
+        return Err("Baris reversal tidak bisa dibalik".into());
+    }
+    let already_reversed: bool = tx
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM stock_adjustment WHERE reverse_of_id = ?1)",
+            params![input.adjustment_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?
+        != 0;
+    if already_reversed {
+        return Err("Audit sudah dikembalikan".into());
+    }
+    let admin_override = if let Some(pin) = input.admin_pin.as_deref() {
+        let valid: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM kasir_pin WHERE pin = ?1 AND role = 'admin' AND is_active = 1)",
+                params![pin],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            != 0;
+        if !valid {
+            return Err("PIN Admin salah".into());
+        }
+        true
+    } else {
+        false
+    };
+    if !admin_override {
+        let created_at = NaiveDateTime::parse_from_str(&target.6, "%Y-%m-%d %H:%M:%S")
+            .map_err(|_| "Waktu audit tidak valid".to_string())?;
+        if Utc::now().naive_utc() - created_at > Duration::hours(48) {
+            return Err("Melebihi batas 48 jam. Minta Admin atau masukkan PIN Admin.".into());
+        }
+        if target.1 != target.4 {
+            return Err(
+                "Stok sudah berubah setelah audit. Minta Admin atau masukkan PIN Admin.".into(),
+            );
+        }
+    }
+    let delta = reversal_delta(target.3);
+    let stok_sesudah = target.1 + delta;
+    if stok_sesudah < 0 {
+        return Err("Reversal membuat stok negatif".into());
+    }
+    tx.execute(
+        "UPDATE produk SET stok = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![stok_sesudah, target.0],
+    )
+    .map_err(|e| e.to_string())?;
+    let alasan = format!("Reversal audit #{}", input.adjustment_id);
+    tx.execute(
+        "INSERT INTO stock_adjustment
+         (produk_id, selisih, stok_sebelum, stok_sesudah, alasan, reverse_of_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            target.0,
+            delta,
+            target.1,
+            stok_sesudah,
+            alasan,
+            input.adjustment_id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = tx.last_insert_rowid();
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(StockAdjustment {
+        id,
+        produk_id: target.0,
+        produk_nama: target.2,
+        selisih: delta,
+        stok_sebelum: target.1,
+        stok_sesudah,
+        alasan,
+        created_at: Utc::now()
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        reverse_of_id: Some(input.adjustment_id),
+        is_reversed: false,
     })
 }
 
@@ -282,7 +465,8 @@ pub fn list_stock_adjustments(state: State<DbState>) -> Result<Vec<StockAdjustme
     let mut stmt = conn
         .prepare(
             "SELECT sa.id, sa.produk_id, p.nama, sa.selisih, sa.stok_sebelum, sa.stok_sesudah,
-                    sa.alasan, sa.created_at
+                    sa.alasan, sa.created_at, sa.reverse_of_id,
+                    EXISTS (SELECT 1 FROM stock_adjustment rev WHERE rev.reverse_of_id = sa.id)
              FROM stock_adjustment sa
              JOIN produk p ON p.id = sa.produk_id
              ORDER BY sa.created_at DESC, sa.id DESC",
@@ -299,6 +483,8 @@ pub fn list_stock_adjustments(state: State<DbState>) -> Result<Vec<StockAdjustme
                 stok_sesudah: row.get(5)?,
                 alasan: row.get(6)?,
                 created_at: row.get(7)?,
+                reverse_of_id: row.get(8)?,
+                is_reversed: row.get::<_, i64>(9)? != 0,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -359,7 +545,10 @@ fn rupiah_int(value: Option<&String>) -> i64 {
 /// Format kolom: nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum.
 /// Jika SKU sudah ada, data produk diupdate; jika SKU kosong, baris selalu menjadi produk baru.
 #[tauri::command]
-pub fn import_produk_csv(state: State<DbState>, csv_text: String) -> Result<ImportProdukResult, String> {
+pub fn import_produk_csv(
+    state: State<DbState>,
+    csv_text: String,
+) -> Result<ImportProdukResult, String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut dibuat = 0;
@@ -373,7 +562,10 @@ pub fn import_produk_csv(state: State<DbState>, csv_text: String) -> Result<Impo
         if line.is_empty() {
             continue;
         }
-        if line_no == 1 && line.to_lowercase().contains("nama") && line.to_lowercase().contains("harga_jual") {
+        if line_no == 1
+            && line.to_lowercase().contains("nama")
+            && line.to_lowercase().contains("harga_jual")
+        {
             continue;
         }
         let cells = parse_csv_line(line);
@@ -390,14 +582,22 @@ pub fn import_produk_csv(state: State<DbState>, csv_text: String) -> Result<Impo
             continue;
         }
         let sku = cells.get(1).map(|v| v.trim()).filter(|v| !v.is_empty());
-        let satuan = cells.get(2).map(|v| v.trim()).filter(|v| !v.is_empty()).unwrap_or("pcs");
+        let satuan = cells
+            .get(2)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .unwrap_or("pcs");
         let harga_beli = rupiah_int(cells.get(3));
         let stok = rupiah_int(cells.get(5));
         let stok_minimum = rupiah_int(cells.get(6));
 
         let existing_id = match sku {
             Some(code) => tx
-                .query_row("SELECT id FROM produk WHERE sku = ?1", params![code], |row| row.get::<_, i64>(0))
+                .query_row(
+                    "SELECT id FROM produk WHERE sku = ?1",
+                    params![code],
+                    |row| row.get::<_, i64>(0),
+                )
                 .ok(),
             None => None,
         };
@@ -413,7 +613,15 @@ pub fn import_produk_csv(state: State<DbState>, csv_text: String) -> Result<Impo
             tx.execute(
                 "INSERT INTO produk (nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum],
+                params![
+                    nama,
+                    sku,
+                    satuan,
+                    harga_beli,
+                    harga_jual,
+                    stok,
+                    stok_minimum
+                ],
             )
             .map_err(|e| format!("Baris {line_no}: gagal buat produk: {e}"))?;
             dibuat += 1;
@@ -421,7 +629,12 @@ pub fn import_produk_csv(state: State<DbState>, csv_text: String) -> Result<Impo
     }
 
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(ImportProdukResult { dibuat, diupdate, dilewati, errors })
+    Ok(ImportProdukResult {
+        dibuat,
+        diupdate,
+        dilewati,
+        errors,
+    })
 }
 
 // ============================================================
@@ -474,30 +687,36 @@ pub fn get_ringkasan_inventori(state: State<DbState>) -> Result<RingkasanInvento
 #[tauri::command]
 pub fn list_laporan_inventori(state: State<DbState>) -> Result<Vec<LaporanInventoriRow>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, nama, sku, satuan, stok, stok_minimum, harga_beli, harga_jual,
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, nama, sku, satuan, stok, stok_minimum, harga_beli, harga_jual,
                 (harga_beli * stok) AS nilai_modal, (harga_jual * stok) AS nilai_jual,
                 ((harga_jual - harga_beli) * stok) AS margin
          FROM produk WHERE is_active = 1
-         ORDER BY lower(nama) ASC"
-    ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(LaporanInventoriRow {
-            id: row.get(0)?,
-            nama: row.get(1)?,
-            sku: row.get(2)?,
-            satuan: row.get(3)?,
-            stok: row.get(4)?,
-            stok_minimum: row.get(5)?,
-            harga_beli: row.get(6)?,
-            harga_jual: row.get(7)?,
-            nilai_modal: row.get(8)?,
-            nilai_jual: row.get(9)?,
-            margin: row.get(10)?,
+         ORDER BY lower(nama) ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(LaporanInventoriRow {
+                id: row.get(0)?,
+                nama: row.get(1)?,
+                sku: row.get(2)?,
+                satuan: row.get(3)?,
+                stok: row.get(4)?,
+                stok_minimum: row.get(5)?,
+                harga_beli: row.get(6)?,
+                harga_jual: row.get(7)?,
+                nilai_modal: row.get(8)?,
+                nilai_jual: row.get(9)?,
+                margin: row.get(10)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     let mut result = Vec::new();
-    for r in rows { result.push(r.map_err(|e| e.to_string())?); }
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
     Ok(result)
 }
 
@@ -565,4 +784,16 @@ pub fn delete_produk_foto(state: State<DbState>, produk_id: i64) -> Result<(), S
     )
     .map_err(|e| format!("Gagal hapus foto: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reversal_delta_is_the_opposite_of_original_delta() {
+        assert_eq!(reversal_delta(-5), 5);
+        assert_eq!(reversal_delta(7), -7);
+        assert_eq!(reversal_delta(0), 0);
+    }
 }

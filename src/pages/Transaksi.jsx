@@ -18,8 +18,13 @@ import { invoke } from "../utils/ipc";
 import { useLocation } from "react-router-dom";
 import { useToast } from "../hooks/useToast";
 import BarcodeScanner from "../components/BarcodeScanner";
+import RupiahInput from "../components/RupiahInput";
+import SearchSelect from "../components/SearchSelect";
 import PinGate from "../components/PinGate";
 import { readPromoMinimumRule, readPromoBxgyRule, readPromoTebusMurahRule } from "./Promo";
+import { isKasirMode, onKasirModeChange } from "../utils/kasirMode";
+import { useHardwareScanner } from "../hooks/useHardwareScanner";
+import { getPrinterPath } from "../utils/printerSettings";
 
 // Helper format rupiah dari angka integer.
 const rupiah = (n) => `Rp ${Number(n).toLocaleString("id-ID")}`;
@@ -41,10 +46,14 @@ export default function Transaksi() {
   // --- State data ---
   const [produk, setProduk] = useState([]);       // Daftar produk aktif
   const [customers, setCustomers] = useState([]); // Daftar customer untuk dropdown
+  // Daftar sales aktif untuk mengaitkan transaksi kasir secara opsional.
+  const [sales, setSales] = useState([]);
   const [search, setSearch] = useState("");       // Filter pencarian produk
   const [cart, setCart] = useState([]);            // Item keranjang: [{produk_id, qty}]
   const [metodeBayar, setMetodeBayar] = useState("tunai"); // tunai | qris
   const [customerId, setCustomerId] = useState("");       // ID customer terpilih (opsional)
+  // Sales terpilih boleh kosong; transaksi tanpa sales tetap sah.
+  const [salesId, setSalesId] = useState("");
   const [diskonTipe, setDiskonTipe] = useState("nominal");   // "nominal" | "persen"
   const [diskonValue, setDiskonValue] = useState("");          // Angka input (nominal Rp atau persen %)
   const [pajakNominal, setPajakNominal] = useState("");        // PPN/pajak nominal checkout
@@ -61,6 +70,8 @@ export default function Transaksi() {
   const [bxgyRule, setBxgyRule] = useState(readPromoBxgyRule); // Rule Beli X Gratis Y dari halaman Promo.
   const [tmRule, setTmRule] = useState(readPromoTebusMurahRule); // Rule Tebus Murah dari halaman Promo.
   const [hasPins, setHasPins] = useState(false); // Ada PIN aktif untuk keamanan kasir
+  // PPN otomatis dari pajak_setting — di-load dari backend saat mount.
+  const [ppnSetting, setPpnSetting] = useState({ ppn_mode: "non", ppn_persen: 0 });
   const [showPinGate, setShowPinGate] = useState(false); // Tampilkan modal PIN gate saat checkout
   const [notFoundSku, setNotFoundSku] = useState(null); // SKU yang discan tapi tidak ada di produk
   const [showPrintConfirm, setShowPrintConfirm] = useState(false); // Konfirmasi cetak faktur
@@ -83,13 +94,16 @@ export default function Transaksi() {
   const load = async () => {
     log("memuat data produk + customer");
     try {
-      const [produkData, customerData] = await Promise.all([
+      const [produkData, customerData, salesData] = await Promise.all([
         invoke("list_produk", { onlyActive: true }),
         invoke("list_customer"),
+        invoke("list_sales"),
       ]);
       if (!cancelled) {
+        invoke("get_pajak_setting").then(setPpnSetting).catch(() => {});
         setProduk(produkData);
         setCustomers(customerData);
+        setSales(salesData);
         // Reorder dari halaman Riwayat membawa item lama ke cart kasir tanpa mengubah transaksi asal.
         // ponytail: validasi stok per item detail bisa ditambah jika reorder lintas hari mulai sering dipakai.
         if (location.state?.reorderItems?.length) {
@@ -97,7 +111,7 @@ export default function Transaksi() {
           window.history.replaceState({}, document.title, window.location.pathname);
           addToast("Item riwayat dimuat ke keranjang", "success");
         }
-        log(`data dimuat; produk=${produkData.length}; customer=${customerData.length}`);
+        log(`data dimuat; produk=${produkData.length}; customer=${customerData.length}; sales=${salesData.length}`);
       }
     } catch (e) {
       addToast(String(e), "error");
@@ -125,14 +139,12 @@ export default function Transaksi() {
   }, []);
 
   // -------------------------------------------------------
-  // FILTER PRODUK — tampilkan hanya stok > 0 yang match search.
+  // FILTER PRODUK — match search; stok 0 tetap ditampilkan agar kasir bisa lihat.
   // -------------------------------------------------------
   const shown = useMemo(
     () =>
-      produk.filter(
-        (p) =>
-          p.stok > 0 &&
-          `${p.nama} ${p.sku || ""}`.toLowerCase().includes(search.toLowerCase()),
+      produk.filter((p) =>
+        `${p.nama} ${p.sku || ""} ${p.kata_kunci || ""}`.toLowerCase().includes(search.toLowerCase()),
       ),
     [produk, search],
   );
@@ -164,9 +176,9 @@ export default function Transaksi() {
   const diskonNominal = diskonTipe === "persen"
     ? Math.min(total, Math.round((total * diskonValueNumber) / 100))
     : Math.min(total, diskonValueNumber);
-  const pajakValue = Number(pajakNominal || 0);
   const biayaValue = Number(biayaLayanan || 0);
   const ongkirValue = Number(ongkir || 0);
+
   // Promo minimum belanja otomatis; disimpan lokal agar kasir tetap offline-first.
   const promoMinBelanja = Number(promoRule.minBelanja || 0);
   const promoValue = Number(promoRule.nilai || 0);
@@ -178,26 +190,47 @@ export default function Transaksi() {
   // Beli X Gratis Y — gratis produk jika subtotal mencapai minimum belanja.
   const bxgyMin = Number(bxgyRule.minBelanja || 0);
   const bxgyEligible = Boolean(bxgyRule.aktif) && total >= bxgyMin && bxgyMin > 0 && bxgyRule.produkId && Number(bxgyRule.qtyGratis || 1) > 0;
-  // Harga produk gratis dikurangi dari total akhir.
   const bxgyProduk = bxgyEligible ? produk.find((p) => p.id === bxgyRule.produkId) : null;
   const bxgyNominal = bxgyProduk ? hargaAktif(bxgyProduk) * Number(bxgyRule.qtyGratis || 1) : 0;
 
   // Tebus Murah — diskon pada produk tertentu jika subtotal memenuhi minimum.
-  // Hanya berlaku untuk 1 unit produk tebus murah.
   const tmMin = Number(tmRule.minBelanja || 0);
   const tmHarga = Number(tmRule.hargaTebus || 0);
   const tmInCart = tmRule.produkId ? cart.find((item) => item.produk_id === tmRule.produkId) : null;
   const tmEligible = Boolean(tmRule.aktif) && total >= tmMin && tmMin > 0 && tmRule.produkId && tmInCart && tmHarga > 0;
   const tmProduk = tmEligible ? produk.find((p) => p.id === tmRule.produkId) : null;
   const tmNormalHarga = tmProduk ? hargaAktif(tmProduk) : 0;
-  // Diskon TM = (harga normal - harga tebus) × 1 unit.
   const tmNominal = tmEligible ? Math.max(0, tmNormalHarga - tmHarga) : 0;
 
-  const totalAkhir = total - diskonNominal - promoNominal - bxgyNominal - tmNominal + pajakValue + biayaValue + ongkirValue;
+  // Auto-calculate PPN from pajak_setting config on the taxable amount (total after discounts).
+  const taxableAmount = Math.max(0, total - diskonNominal - promoNominal - bxgyNominal - tmNominal);
+  const ppnPersen = ppnSetting.ppn_persen || 0;
+  const ppnAmount = ppnSetting.ppn_mode === "exclude"
+    ? taxableAmount * (ppnPersen / 100)
+    : ppnSetting.ppn_mode === "include"
+      ? taxableAmount - taxableAmount / (1 + ppnPersen / 100)
+      : 0;
+  const pajakValue = Math.round(ppnAmount);
+
+  // exclude mode: add PPN on top of taxable amount
+  // include/non mode: PPN already embedded or zero
+  const ppnTambah = ppnSetting.ppn_mode === "exclude" ? pajakValue : 0;
+  const totalAkhir = taxableAmount + ppnTambah + biayaValue + ongkirValue;
   const kembalian = Math.max(0, Number(uangDiterima || 0) - totalAkhir);
   const pembayaranTidakMencukupi = Number(uangDiterima || 0) < totalAkhir;
 
   // End key → fokus ke input uang diterima
+  // Escape menutup popup Kasir paling atas tanpa membatalkan keranjang atau checkout aktif.
+  useEffect(() => {
+    const handleEscape = (event) => {
+      if (event.key !== "Escape") return;
+      if (showPrintConfirm) { event.preventDefault(); setShowPrintConfirm(false); return; }
+      if (notFoundSku) { event.preventDefault(); setNotFoundSku(null); }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [showPrintConfirm, notFoundSku]);
+
   useEffect(() => {
     const handle = (e) => {
       if (e.key === "End" && cart.length > 0) {
@@ -213,12 +246,21 @@ export default function Transaksi() {
   // ADD — tambah produk ke keranjang (+1 qty).
   // -------------------------------------------------------
   const add = (p) => {
+    if (Number(p.stok) <= 0) {
+      addToast(`Stok ${p.nama} habis, tidak bisa ditambahkan`, "error");
+      return;
+    }
     log(`tambah ke cart: id=${p.id}; nama=${p.nama}`);
-    setCart((old) =>
-      old.some((i) => i.produk_id === p.id)
+    setCart((old) => {
+      const existing = old.find((i) => i.produk_id === p.id);
+      if (existing && existing.qty >= Number(p.stok)) {
+        addToast(`Stok ${p.nama} hanya tersisa ${p.stok}`, "error");
+        return old;
+      }
+      return existing
         ? old.map((i) => (i.produk_id === p.id ? { ...i, qty: i.qty + 1 } : i))
-        : [...old, { produk_id: p.id, qty: 1, satuan_pilihan: "" }],
-    );
+        : [...old, { produk_id: p.id, qty: 1, satuan_pilihan: "" }];
+    });
   };
 
   // -------------------------------------------------------
@@ -241,6 +283,10 @@ export default function Transaksi() {
     if (!found) {
       log(`barcode tidak ditemukan: kode=${String(kode).slice(0, 60)}`);
       setNotFoundSku(String(kode));
+      return;
+    }
+    if (Number(found.stok) <= 0) {
+      addToast(`Stok ${found.nama} habis, tidak bisa ditambahkan`, "error");
       return;
     }
     add(found);
@@ -273,8 +319,9 @@ export default function Transaksi() {
         metodeBayar,
         catatan: promoNotes.length > 0 ? `Promo: ${promoNotes}` : null,
         diskonNominal: totalDiskon > 0 ? totalDiskon : null,
-        customerId: customerId ? Number(customerId) : null,
-        pajakNominal: pajakValue > 0 ? pajakValue : null,
+         customerId: customerId ? Number(customerId) : null,
+         salesId: salesId ? Number(salesId) : null,
+         pajakNominal: pajakValue > 0 ? pajakValue : null,
         biayaLayanan: biayaValue > 0 ? biayaValue : null,
         ongkir: ongkirValue > 0 ? ongkirValue : null,
       };
@@ -284,7 +331,6 @@ export default function Transaksi() {
       // Reset cart + diskon setelah sukses.
       setCart([]);
       setDiskonValue("");
-      setPajakNominal("");
       setBiayaLayanan("");
       setOngkir("");
       setUangDiterima("");
@@ -361,20 +407,33 @@ export default function Transaksi() {
     localStorage.setItem("kasirView", next);
   };
 
+  const [kasirModeActive, setKasirModeActive] = useState(() => isKasirMode());
+  useEffect(() => onKasirModeChange(setKasirModeActive), []);
+
+  // USB/HID barcode scanner (keyboard wedge) — universal, model-agnostic
+  useHardwareScanner(
+    (code) => {
+      if (scanOpen || showPinGate || showPrintConfirm) return;
+      addByBarcode(code);
+    },
+    { enabled: true, minLength: 3, maxGapMs: 55 }
+  );
+
   // -------------------------------------------------------
   // RENDER — UI kasir: search bar, filter, produk grid, cart footer.
   // -------------------------------------------------------
   return (
-    <div className="kasir-page">
+    <div className={`kasir-page${kasirModeActive ? " kasir-page--focus" : ""}`}>
       {/* Toolbar: search, scan, view toggle, customer, diskon */}
       <div className="kasir-toolbar">
         <div style={{ display: "flex", gap: 8 }}>
           <input
             className="input-field"
             style={{ flex: 1 }}
-            placeholder="Cari produk / SKU..."
+            placeholder="Cari / scan barcode SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            data-scanner="allow"
           />
           {/* Tombol buka BarcodeScanner modal */}
           <button
@@ -392,26 +451,25 @@ export default function Transaksi() {
             <span className="material-symbols-outlined">{view === "card" ? "view_list" : "grid_view"}</span>
           </button>
         </div>
-        {/* Dropdown customer + input diskon */}
+        {/* Dropdown customer dan sales; diskon dikelola di panel keranjang kanan. */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <select
+          {/* Customer opsional; placeholder UMUM tampil abu-abu, tanpa opsi kosong */}
+          <SearchSelect
             className="input-field"
             style={{ flex: 1, minWidth: 160 }}
             value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
-          >
-            <option value="">Tanpa customer</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>{c.nama}</option>
-            ))}
-          </select>
-          <input
+            onChange={setCustomerId}
+            placeholder="UMUM"
+            options={customers.map((c) => ({ value: String(c.id), label: c.nama }))}
+          />
+          {/* Sales opsional; placeholder abu-abu, tanpa opsi kosong */}
+          <SearchSelect
             className="input-field"
-            style={{ width: 160 }}
-            inputMode="numeric"
-            placeholder="Diskon Rp"
-            value={diskonValue}
-            onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
+            style={{ flex: 1, minWidth: 140 }}
+            value={salesId}
+            onChange={setSalesId}
+            placeholder="Tanpa sales"
+            options={sales.map((s) => ({ value: String(s.id), label: s.nama }))}
           />
         </div>
       </div>
@@ -452,8 +510,10 @@ export default function Transaksi() {
               className="card"
               onClick={() => add(p)}
               style={{
-                border: 0,
-                cursor: "pointer",
+                 border: 0,
+                 borderBottom: "1px solid var(--color-outline-variant)",
+                 borderRadius: 0,
+                 cursor: "pointer",
                 display: "flex",
                 justifyContent: "space-between",
                 textAlign: "left",
@@ -516,18 +576,15 @@ export default function Transaksi() {
                     <div className="kasir-cart-product">
                       <span>{p?.nama}</span>
                       {rules.length > 0 && (
-                        <select
+                        <SearchSelect
                           className="input-field"
                           value={i.satuan_pilihan || ""}
-                          onChange={(e) => {
-                            setCart((old) => old.map((x) => x.produk_id === i.produk_id ? { ...x, satuan_pilihan: e.target.value } : x));
+                          onChange={(value) => {
+                            setCart((old) => old.map((x) => x.produk_id === i.produk_id ? { ...x, satuan_pilihan: value } : x));
                           }}
-                        >
-                          <option value="">{p.satuan}</option>
-                          {rules.map((r, idx) => (
-                            <option key={idx} value={r.satuan}>{r.satuan} ({r.konversi}x)</option>
-                          ))}
-                        </select>
+                          options={[{ value: "", label: p.satuan }, ...rules.map((r) => ({ value: r.satuan, label: `${r.satuan} (${r.konversi}x)` }))]}
+                          placeholder={p.satuan}
+                        />
                       )}
                     </div>
                     <div className="kasir-cart-price" aria-label={`harga ${rupiah(harga * i.qty)}`}>
@@ -588,35 +645,44 @@ export default function Transaksi() {
               </>
             )}
 
-            {/* Biaya tambahan KasGo Phase 1: pajak, service charge, ongkir */}
-            {!cartCollapsed && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
-                <input
-                  className="input-field"
-                  style={{ textAlign: "right", padding: "8px 6px", fontSize: 12 }}
-                  inputMode="numeric"
-                  placeholder="Pajak"
-                  value={pajakNominal}
-                  onChange={(e) => setPajakNominal(e.target.value.replace(/\D/g, ""))}
-                  aria-label="pajak nominal"
-                />
-                <input
-                  className="input-field"
-                  style={{ textAlign: "right", padding: "8px 6px", fontSize: 12 }}
-                  inputMode="numeric"
+            {/* Biaya tambahan: service charge, ongkir */}
+            {!cartCollapsed && ppnSetting.ppn_mode === "non" && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
+                <RupiahInput
+                  style={{ padding: "8px 6px", fontSize: 12 }}
                   placeholder="Service"
                   value={biayaLayanan}
-                  onChange={(e) => setBiayaLayanan(e.target.value.replace(/\D/g, ""))}
-                  aria-label="biaya layanan"
+                  onChange={(val) => setBiayaLayanan(val)}
                 />
-                <input
-                  className="input-field"
-                  style={{ textAlign: "right", padding: "8px 6px", fontSize: 12 }}
-                  inputMode="numeric"
+                <RupiahInput
+                  style={{ padding: "8px 6px", fontSize: 12 }}
                   placeholder="Ongkir"
                   value={ongkir}
-                  onChange={(e) => setOngkir(e.target.value.replace(/\D/g, ""))}
-                  aria-label="ongkir"
+                  onChange={(val) => setOngkir(val)}
+                />
+              </div>
+            )}
+            {!cartCollapsed && ppnSetting.ppn_mode !== "non" && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>
+                    PPN {ppnSetting.ppn_persen}%{ppnSetting.ppn_mode === "include" ? " (include)" : " (exclude)"}
+                  </span>
+                  <div style={{ padding: "8px 6px", fontSize: 12, background: "var(--color-surface-container-high)", borderRadius: 6, textAlign: "right", color: "var(--color-text-primary)" }}>
+                    {rupiah(pajakValue)}
+                  </div>
+                </div>
+                <RupiahInput
+                  style={{ padding: "8px 6px", fontSize: 12 }}
+                  placeholder="Service"
+                  value={biayaLayanan}
+                  onChange={(val) => setBiayaLayanan(val)}
+                />
+                <RupiahInput
+                  style={{ padding: "8px 6px", fontSize: 12 }}
+                  placeholder="Ongkir"
+                  value={ongkir}
+                  onChange={(val) => setOngkir(val)}
                 />
               </div>
             )}
@@ -648,13 +714,11 @@ export default function Transaksi() {
                     >
                       {diskonTipe === "nominal" ? "Rp" : "%"}
                     </button>
-                    <input
-                      className="input-field"
-                      style={{ width: 100, textAlign: "right" }}
-                      inputMode="numeric"
+                    <RupiahInput
+                      style={{ width: 100 }}
                       placeholder="0"
                       value={diskonValue}
-                      onChange={(e) => setDiskonValue(e.target.value.replace(/\D/g, ""))}
+                      onChange={(val) => setDiskonValue(val)}
                     />
                   </div>
                 )}
@@ -756,23 +820,25 @@ export default function Transaksi() {
         >
           <div
             className="card"
-            style={{
-              width: "min(92vw, 380px)",
-              textAlign: "center",
+style={{
+               width: "min(92vw, 380px)",
+               textAlign: "center",
+               position: "relative",
               borderRadius: 24,
               padding: 20,
               background: "#ffffff",
               boxShadow: "0 24px 60px rgba(15, 23, 42, 0.35)",
             }}
           >
-            <div style={{ width: 64, height: 64, margin: "0 auto 12px", borderRadius: 20, display: "grid", placeItems: "center", background: "#fef2f2", color: "#dc2626" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 36 }}>inventory_2</span>
-            </div>
-            <h2 style={{ margin: "0 0 8px", fontSize: 20, color: "#0f172a" }}>SKU tidak ada dalam database</h2>
+<div style={{ width: 64, height: 64, margin: "0 auto 12px", borderRadius: 20, display: "grid", placeItems: "center", background: "#fef2f2", color: "#dc2626" }}>
+               <span className="material-symbols-outlined" style={{ fontSize: 36 }}>inventory_2</span>
+             </div>
+             <button type="button" aria-label="Tutup" onClick={() => setNotFoundSku(null)} style={{ position: "absolute", top: 8, right: 8, border: 0, background: "transparent", cursor: "pointer", color: "#64748b" }}><span className="material-symbols-outlined">close</span></button>
+             <h2 style={{ margin: "0 0 8px", fontSize: 20, color: "#0f172a" }}>SKU tidak ada dalam database</h2>
             <p style={{ margin: "0 0 10px", color: "#64748b", fontSize: 14 }}>
               Kamera membaca SKU berikut, tapi produk belum terdaftar:
             </p>
-            <div style={{ margin: "0 auto 16px", padding: "10px 12px", borderRadius: 12, background: "#f8fafc", color: "#7C3AED", fontWeight: 800, wordBreak: "break-all" }}>
+            <div style={{ margin: "0 auto 16px", padding: "10px 12px", borderRadius: 12, background: "#f8fafc", color: "var(--color-primary)", fontWeight: 800, wordBreak: "break-all" }}>
               {notFoundSku}
             </div>
             <button
@@ -791,6 +857,7 @@ export default function Transaksi() {
       {showPinGate && (
         <PinGate
           role="kasir"
+          onCancel={() => setShowPinGate(false)}
           onSuccess={() => {
             setShowPinGate(false);
             executeSubmit();
@@ -808,12 +875,13 @@ export default function Transaksi() {
         >
           <div
             className="card"
-            style={{ width: "min(92vw, 360px)", textAlign: "center", borderRadius: 24, padding: 28, background: "#ffffff", boxShadow: "0 24px 60px rgba(15,23,42,0.25)" }}
+            style={{ width: "min(92vw, 360px)", textAlign: "center", borderRadius: 24, padding: 28, background: "#ffffff", boxShadow: "0 24px 60px rgba(15,23,42,0.25)", position: "relative" }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 setShowPrintConfirm(false);
-                invoke("print_struk", { transaksiId: lastTransactionId })
-                  .then(() => addToast("Struk dicetak", "success"))
+                const path = getPrinterPath() || null;
+                invoke("print_struk", { transaksiId: lastTransactionId, printerPath: path })
+                  .then((msg) => addToast(msg || "Struk dicetak", "success"))
                   .catch((err) => addToast(`Gagal cetak: ${err}`, "error"));
               }
               if (e.key === "Escape") setShowPrintConfirm(false);
@@ -822,6 +890,7 @@ export default function Transaksi() {
             <div style={{ width: 48, height: 48, margin: "0 auto 12px", borderRadius: 12, display: "grid", placeItems: "center", background: "var(--color-primary-fixed)", color: "var(--color-primary)" }}>
               <span className="material-symbols-outlined" style={{ fontSize: 28 }}>print</span>
             </div>
+            <button type="button" aria-label="Tutup" onClick={() => setShowPrintConfirm(false)} style={{ position: "absolute", top: 10, right: 10, border: 0, background: "transparent", cursor: "pointer", color: "#64748b" }}><span className="material-symbols-outlined">close</span></button>
             <h2 style={{ margin: "0 0 16px", fontSize: 16, color: "var(--color-text-primary)" }}>Cetak faktur?</h2>
             <div style={{ display: "flex", gap: 10 }}>
               <button
@@ -839,8 +908,9 @@ export default function Transaksi() {
                 autoFocus
                 onClick={() => {
                   setShowPrintConfirm(false);
-                  invoke("print_struk", { transaksiId: lastTransactionId })
-                    .then(() => addToast("Struk dicetak", "success"))
+                  const path = getPrinterPath() || null;
+                  invoke("print_struk", { transaksiId: lastTransactionId, printerPath: path })
+                    .then((msg) => addToast(msg || "Struk dicetak", "success"))
                     .catch((err) => addToast(`Gagal cetak: ${err}`, "error"));
                 }}
               >

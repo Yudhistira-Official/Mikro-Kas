@@ -16,7 +16,7 @@ pub struct DbState(pub Mutex<Connection>);
 
 /// Inisialisasi database: buat direktori, buka/ buat file, set pragma, migrasi.
 /// TIDAK PERNAH PANIC — selalu return Connection (fallback ke /tmp atau in-memory).
-pub fn init_db(app_dir: PathBuf) -> Connection {
+pub fn init_db(app_dir: PathBuf) -> Result<Connection, String> {
     let db_path = match ensure_dir(&app_dir) {
         Ok(_) => app_dir.join("mikrokas.db"),
         Err(_) => {
@@ -32,8 +32,8 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
         Ok(c) => c,
         Err(e) => {
             eprintln!("DB_INIT: Gagal buka DB, fallback memory: {e}");
-            return Connection::open_in_memory()
-                .expect("In-memory database gagal dibuat — situasi tidak normal");
+            return Ok(Connection::open_in_memory()
+                .expect("In-memory database gagal dibuat — situasi tidak normal"));
         }
     };
 
@@ -155,6 +155,19 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
 
     // Migrasi 015: Multi user & role untuk login desktop/kasir.
     let _ = conn.execute_batch(include_str!("../migrations/015_user_role.sql"));
+    seed_default_admin(&conn)?;
+
+    // Tabel pertanyaan keamanan untuk fitur lupa password
+    let _ = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS security_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            pertanyaan TEXT NOT NULL,
+            jawaban TEXT NOT NULL,
+            urutan INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(user_id, urutan)
+        );"
+    );
 
     let _ = conn.execute_batch(include_str!("../migrations/016_nomor_setting.sql"));
     let _ = conn.execute_batch(include_str!("../migrations/017_pajak_setting.sql"));
@@ -177,7 +190,7 @@ pub fn init_db(app_dir: PathBuf) -> Connection {
     ensure_column(&conn, "produk", "metode_hpp", "TEXT NOT NULL DEFAULT 'fifo'");
 
     eprintln!("DB_INIT: Success");
-    conn
+    Ok(conn)
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) {
@@ -215,4 +228,204 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 
 fn ensure_dir(dir: &PathBuf) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{:?}", e))
+}
+
+fn seed_default_admin(conn: &Connection) -> Result<(), String> {
+    // Check if there's at least one active admin user
+    let active_admin_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role = 'admin'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // If active admin exists, nothing to do
+    if active_admin_count > 0 {
+        return Ok(());
+    }
+
+    let hash = bcrypt::hash("admin", 10).map_err(|e| e.to_string())?;
+    
+    // Check if 'admin' username exists (regardless of active status)
+    let admin_exists: bool = conn
+        .query_row("SELECT COUNT(*) FROM users WHERE username = 'admin'", [], |row| row.get::<_, i64>(0).map(|c| c > 0))
+        .map_err(|e| e.to_string())?;
+
+    if admin_exists {
+        conn.execute(
+            "UPDATE users SET is_active = 1, password_hash = ?1 WHERE username = 'admin'",
+            rusqlite::params![hash],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES (?1, ?2, ?3, ?4, 1)",
+            rusqlite::params!["admin", hash, "Administrator", "admin"],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seed_default_admin;
+    use bcrypt::verify;
+    use rusqlite::{params, Connection};
+
+    fn test_connection_with_users_table() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                nama_lengkap TEXT,
+                role TEXT NOT NULL DEFAULT 'kasir',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn count_users(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn count_username(conn: &Connection, username: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn password_hash(conn: &Connection, username: &str) -> String {
+        conn.query_row(
+            "SELECT password_hash FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn seeded_admin_fields(conn: &Connection) -> (String, String, i64) {
+        conn.query_row(
+            "SELECT nama_lengkap, role, is_active FROM users WHERE username = 'admin'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    fn insert_test_user(conn: &Connection, username: &str) {
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES (?1, ?2, ?3, ?4, 1)",
+            params![username, "test-hash", "Test User", "kasir"],
+        )
+        .unwrap();
+    }
+
+    fn insert_active_user(conn: &Connection, username: &str, role: &str) {
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES (?1, ?2, ?3, ?4, 1)",
+            params![username, "test-hash", "Test User", role],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn seeds_default_admin_only_when_users_table_is_empty() {
+        let conn = test_connection_with_users_table();
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 1);
+        assert!(verify("admin", &password_hash(&conn, "admin")).unwrap());
+        assert_eq!(seeded_admin_fields(&conn), ("Administrator".into(), "admin".into(), 1));
+    }
+
+    #[test]
+    fn default_admin_seed_is_idempotent_and_non_destructive() {
+        let conn = test_connection_with_users_table();
+        seed_default_admin(&conn).unwrap();
+        let first_hash = password_hash(&conn, "admin");
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 1);
+        assert_eq!(password_hash(&conn, "admin"), first_hash);
+    }
+
+    #[test]
+    fn existing_active_admin_prevents_default_admin_seed() {
+        let conn = test_connection_with_users_table();
+        // Insert an active admin
+        let hash = bcrypt::hash("custom-pass", 10).unwrap();
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES ('myadmin', ?1, 'My Admin', 'admin', 1)",
+            params![hash],
+        ).unwrap();
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 1);
+        assert_eq!(count_username(&conn, "admin"), 0);
+    }
+
+    #[test]
+    fn seeds_admin_when_only_supervisor_active() {
+        let conn = test_connection_with_users_table();
+        insert_active_user(&conn, "supervisor1", "supervisor");
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 2);
+        assert_eq!(count_username(&conn, "admin"), 1);
+        assert!(verify("admin", &password_hash(&conn, "admin")).unwrap());
+    }
+
+    #[test]
+    fn seeds_admin_when_only_kasir_active() {
+        let conn = test_connection_with_users_table();
+        insert_active_user(&conn, "kasir1", "kasir");
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 2);
+        assert_eq!(count_username(&conn, "admin"), 1);
+        assert!(verify("admin", &password_hash(&conn, "admin")).unwrap());
+    }
+
+    #[test]
+    fn reactivates_admin_when_no_active_admin_exists() {
+        let conn = test_connection_with_users_table();
+        // Insert admin but inactive
+        let hash = bcrypt::hash("original-pass", 10).unwrap();
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES ('admin', ?1, 'Admin', 'admin', 0)",
+            params![hash],
+        ).unwrap();
+        
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 1);
+        let (_, _, active) = seeded_admin_fields(&conn);
+        assert_eq!(active, 1);
+        assert!(verify("admin", &password_hash(&conn, "admin")).unwrap());
+    }
+
+    #[test]
+    fn reactivates_admin_when_active_kasir_but_no_active_admin() {
+        let conn = test_connection_with_users_table();
+        // Active kasir
+        insert_active_user(&conn, "kasir1", "kasir");
+        // Inactive admin
+        let hash = bcrypt::hash("old-pass", 10).unwrap();
+        conn.execute(
+            "INSERT INTO users (username, password_hash, nama_lengkap, role, is_active) VALUES ('admin', ?1, 'Admin', 'admin', 0)",
+            params![hash],
+        ).unwrap();
+        
+        seed_default_admin(&conn).unwrap();
+        assert_eq!(count_users(&conn), 2);
+        let (_, _, active) = seeded_admin_fields(&conn);
+        assert_eq!(active, 1);
+        assert!(verify("admin", &password_hash(&conn, "admin")).unwrap());
+    }
 }

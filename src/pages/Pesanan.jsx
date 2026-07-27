@@ -1,23 +1,30 @@
 // ============================================================
-// Pesanan.jsx — Pesanan pelanggan + DP/down payment.
-//
-// Tujuan:
-//   - Mencatat pre-order pelanggan sebelum jadi transaksi penjualan.
-//   - Menyimpan total, DP, sisa bayar, jatuh tempo, status.
-//   - Tidak mengurangi stok otomatis; stok baru berubah saat kasir checkout.
-//
-// UX:
-//   - Tab Open/Selesai/Batal.
-//   - Summary cepat untuk total nilai pesanan, DP, sisa bayar.
-//   - Form ringkas sesuai desain Stitch "Pesanan Pelanggan + DP".
+// Pesanan.jsx — Pesanan pelanggan + DP (PageKit)
 // ============================================================
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import DateField from "../components/DateField";
+import SearchSelect from "../components/SearchSelect";
+import RupiahInput from "../components/RupiahInput";
+import {
+  PageShell,
+  DataPanel,
+  DataTable,
+  FormModal,
+  InfoNote,
+  StatusBadge,
+  useSearchFilter,
+  rupiah,
+} from "../components/PageKit";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 const statusLabel = { open: "Open", selesai: "Selesai", batal: "Batal" };
+const statusTone = { open: "primary", selesai: "success", batal: "danger" };
 
+/**
+ * Halaman pre-order pelanggan: total, DP, sisa, jatuh tempo, status.
+ * Stok belum berkurang sampai checkout kasir.
+ */
 export default function Pesanan() {
   const { addToast } = useToast();
   const [tab, setTab] = useState("open");
@@ -25,9 +32,21 @@ export default function Pesanan() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ customer_id: "", nama_pemesan: "", total: "", dp: "", jatuh_tempo: "", catatan: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    customer_id: "",
+    nama_pemesan: "",
+    no_hp: "",
+    total: "",
+    dp: "",
+    jatuh_tempo: "",
+    catatan: "",
+  });
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustNama, setNewCustNama] = useState("");
+  const [newCustTelepon, setNewCustTelepon] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [pesanan, customer] = await Promise.all([
@@ -41,18 +60,34 @@ export default function Pesanan() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast, tab]);
 
-  useEffect(() => { load(); }, [tab]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  const summary = useMemo(() => rows.reduce((acc, row) => ({
-    total: acc.total + Number(row.total || 0),
-    dp: acc.dp + Number(row.dp || 0),
-    sisa: acc.sisa + Number(row.sisa || 0),
-  }), { total: 0, dp: 0, sisa: 0 }), [rows]);
+  const summary = useMemo(
+    () =>
+      rows.reduce(
+        (acc, row) => ({
+          total: acc.total + Number(row.total || 0),
+          dp: acc.dp + Number(row.dp || 0),
+          sisa: acc.sisa + Number(row.sisa || 0),
+        }),
+        { total: 0, dp: 0, sisa: 0 }
+      ),
+    [rows]
+  );
 
-  const setNumber = (field) => (event) => setForm((prev) => ({ ...prev, [field]: event.target.value.replace(/\D/g, "") }));
-  const setText = (field) => (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  const { query, setQuery, filtered } = useSearchFilter(
+    rows,
+    (row) => `${row.nama_pemesan || ""} ${row.catatan || ""} ${row.id}`
+  );
+
+  const setNumber = (field) => (event) =>
+    setForm((prev) => ({ ...prev, [field]: event.target.value.replace(/\D/g, "") }));
+  const setText = (field) => (event) =>
+    setForm((prev) => ({ ...prev, [field]: event.target.value }));
 
   const pickCustomer = (value) => {
     const customer = customers.find((c) => String(c.id) === value);
@@ -60,7 +95,36 @@ export default function Pesanan() {
       ...prev,
       customer_id: value,
       nama_pemesan: customer?.nama || prev.nama_pemesan,
+      no_hp: customer?.telepon || prev.no_hp,
     }));
+  };
+
+  const resetForm = () =>
+    setForm({
+      customer_id: "",
+      nama_pemesan: "",
+      no_hp: "",
+      total: "",
+      dp: "",
+      jatuh_tempo: "",
+      catatan: "",
+    });
+
+  const createCustomer = async () => {
+    if (!newCustNama.trim()) return addToast("Nama customer wajib diisi", "error");
+    try {
+      const created = await invoke("create_customer", {
+        input: { nama: newCustNama.trim(), telepon: newCustTelepon.trim() || null, alamat: null, deskripsi_tambahan: null, limit_kredit: 0 },
+      });
+      setCustomers((prev) => [...prev, created].sort((a, b) => a.nama.localeCompare(b.nama)));
+      pickCustomer(String(created.id));
+      setShowNewCustomer(false);
+      setNewCustNama("");
+      setNewCustTelepon("");
+      addToast("Customer ditambahkan", "success");
+    } catch (e) {
+      addToast(`Gagal tambah customer: ${e}`, "error");
+    }
   };
 
   const submit = async (event) => {
@@ -68,145 +132,267 @@ export default function Pesanan() {
     if (!form.nama_pemesan.trim()) return addToast("Nama pemesan wajib diisi", "error");
     const total = Number(form.total || 0);
     const dp = Number(form.dp || 0);
+    if (total <= 0) return addToast("Total pesanan harus lebih dari 0", "error");
     if (dp > total) return addToast("DP tidak boleh lebih besar dari total", "error");
+    setSubmitting(true);
     try {
       await invoke("create_pesanan_customer", {
         input: {
           customer_id: form.customer_id ? Number(form.customer_id) : null,
-          nama_pemesan: form.nama_pemesan.trim(),
-          total,
+           nama_pemesan: form.nama_pemesan.trim(),
+           no_hp: form.no_hp.trim() || null,
+           total,
           dp,
           jatuh_tempo: form.jatuh_tempo || null,
           catatan: form.catatan.trim() || null,
         },
       });
-      setForm({ customer_id: "", nama_pemesan: "", total: "", dp: "", jatuh_tempo: "", catatan: "" });
+      addToast("Pesanan dicatat", "success");
       setShowForm(false);
-      addToast("Pesanan disimpan", "success");
-      load();
+      resetForm();
+      setTab("open");
+      await load();
     } catch (e) {
-      addToast(`Gagal simpan: ${e}`, "error");
+      addToast(`Gagal simpan pesanan: ${e}`, "error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const updateStatus = async (id, status) => {
+  const onStatus = async (id, status) => {
     try {
       await invoke("update_status_pesanan_customer", { id, status });
-      addToast(`Pesanan ${statusLabel[status].toLowerCase()}`, "success");
-      load();
+      addToast(`Status → ${statusLabel[status] || status}`, "success");
+      await load();
     } catch (e) {
       addToast(`Gagal ubah status: ${e}`, "error");
     }
   };
 
-  const remove = async (id) => {
-    if (!confirm("Hapus pesanan ini?")) return;
+  const onDelete = async (id) => {
+    if (!window.confirm("Hapus pesanan ini?")) return;
     try {
       await invoke("delete_pesanan_customer", { id });
       addToast("Pesanan dihapus", "success");
-      load();
+      await load();
     } catch (e) {
       addToast(`Gagal hapus: ${e}`, "error");
     }
   };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBottom: "88px" }}>
-      <div>
-        <p className="text-headline-md">Pesanan Pelanggan</p>
-        <p className="text-body-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>Pre-order + DP sebelum checkout kasir.</p>
-      </div>
+  const columns = [
+    {
+      key: "id",
+      label: "ID",
+      render: (row) => <strong>#{row.id}</strong>,
+    },
+    {
+      key: "nama",
+      label: "Pemesan",
+      render: (row) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{row.nama_pemesan}</div>
+          {row.catatan && (
+            <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+              {row.catatan}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "total",
+      label: "Total",
+      align: "right",
+      render: (row) => rupiah(row.total),
+    },
+    {
+      key: "dp",
+      label: "DP",
+      align: "right",
+      render: (row) => <span style={{ color: "var(--color-income-green)" }}>{rupiah(row.dp)}</span>,
+    },
+    {
+      key: "sisa",
+      label: "Sisa",
+      align: "right",
+      render: (row) => (
+        <strong style={{ color: Number(row.sisa) > 0 ? "var(--color-warning-amber)" : "var(--color-income-green)" }}>
+          {rupiah(row.sisa)}
+        </strong>
+      ),
+    },
+    {
+      key: "jatuh_tempo",
+      label: "Jatuh Tempo",
+      render: (row) => row.jatuh_tempo || "—",
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (row) => (
+        <StatusBadge label={statusLabel[row.status] || row.status} tone={statusTone[row.status] || "neutral"} />
+      ),
+    },
+    {
+      key: "aksi",
+      label: "Aksi",
+      render: (row) => (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {row.status === "open" && (
+            <>
+              <button type="button" className="btn-primary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => onStatus(row.id, "selesai")}>
+                Selesai
+              </button>
+              <button type="button" className="btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => onStatus(row.id, "batal")}>
+                Batal
+              </button>
+            </>
+          )}
+          {row.status !== "open" && (
+            <button type="button" className="btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => onStatus(row.id, "open")}>
+              Buka Lagi
+            </button>
+          )}
+          <button type="button" className="btn-icon" onClick={() => onDelete(row.id)} aria-label="hapus pesanan">
+            <span className="material-symbols-outlined" style={{ color: "var(--color-expense-red)", fontSize: 18 }}>
+              delete
+            </span>
+          </button>
+        </div>
+      ),
+    },
+  ];
 
-      <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.5rem", padding: "0.5rem", background: "var(--color-surface-container-low)" }}>
-        {["open", "selesai", "batal"].map((s) => (
-          <button key={s} className={tab === s ? "btn-primary" : "btn-secondary"} onClick={() => setTab(s)}>{statusLabel[s]}</button>
+  return (
+    <PageShell
+      eyebrow="PENJUALAN"
+      title="Pesanan Pelanggan + DP"
+      description="Catat pre-order sebelum jadi penjualan. Stok belum berkurang sampai checkout di kasir."
+      actions={
+        <button
+          type="button"
+          className="btn-primary sales-page__add"
+          onClick={() => {
+            resetForm();
+            setShowForm(true);
+          }}
+        >
+          <span className="material-symbols-outlined">add</span>
+          Pesanan Baru
+        </button>
+      }
+      stats={[
+        { label: "Nilai Pesanan", value: rupiah(summary.total), icon: "shopping_bag" },
+        { label: "Total DP", value: rupiah(summary.dp), icon: "payments", tone: "var(--color-income-green)" },
+        { label: "Sisa Bayar", value: rupiah(summary.sisa), icon: "account_balance_wallet", tone: "var(--color-warning-amber)" },
+        { label: "Jumlah", value: filtered.length, icon: "list_alt" },
+      ]}
+    >
+      <InfoNote icon="info">
+        Tab Open / Selesai / Batal memfilter status. DP dicatat di sini; pelunasan dan stok diproses saat kasir.
+      </InfoNote>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: "1rem" }}>
+        {["open", "selesai", "batal"].map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={tab === key ? "btn-primary" : "btn-secondary"}
+            onClick={() => setTab(key)}
+          >
+            {statusLabel[key]}
+          </button>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem" }}>
-        <SummaryCard label="Total" value={rupiah(summary.total)} color="var(--color-primary)" />
-        <SummaryCard label="DP" value={rupiah(summary.dp)} color="var(--color-income-green)" />
-        <SummaryCard label="Sisa" value={rupiah(summary.sisa)} color="var(--color-warning-amber)" />
-      </div>
-
-      <button className="btn-primary" onClick={() => setShowForm(true)} style={{ width: "100%" }}>+ Tambah Pesanan</button>
-
-      {loading ? (
-        <div className="loading-page"><div className="spinner" /></div>
-      ) : rows.length === 0 ? (
-        <div className="empty-state"><span className="material-symbols-outlined">assignment</span><p className="text-body-md">Belum ada pesanan</p></div>
-      ) : (
-        rows.map((row) => <PesananCard key={row.id} row={row} onStatus={updateStatus} onDelete={remove} />)
-      )}
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari pemesan, catatan, atau ID..."
+        onRefresh={load}
+        loading={loading}
+        isEmpty={filtered.length === 0}
+        emptyIcon="assignment"
+        emptyTitle="Belum ada pesanan"
+        emptyHint="Tambah pesanan baru atau pilih tab status lain."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(row) => row.id} />
+      </DataPanel>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-headline-md" style={{ marginBottom: "1rem" }}>Tambah Pesanan Baru</h3>
-            <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              <div>
-                <label className="input-label">Pilih Pelanggan</label>
-                <select className="input-field" value={form.customer_id} onChange={(e) => pickCustomer(e.target.value)}>
-                  <option value="">— Manual / pelanggan baru —</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.nama}</option>)}
-                </select>
+        <FormModal
+          title="Pesanan Baru"
+          description="Isi total estimasi dan DP. Sisa bayar dihitung otomatis."
+          onClose={() => {
+            setShowForm(false);
+            resetForm();
+          }}
+          onSubmit={submit}
+          submitLabel="Simpan Pesanan"
+          submitting={submitting}
+        >
+          <div>
+            <label className="input-label">Pelanggan (opsional)</label>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <SearchSelect
+                className="input-field"
+                value={form.customer_id}
+                onChange={(value) => pickCustomer(value)}
+                placeholder="— Tanpa master pelanggan —"
+                options={[{ value: "", label: "— Tanpa master pelanggan —" }, ...customers.map((c) => ({ value: String(c.id), label: c.nama }))]}
+              />
+              <button type="button" className="btn-icon" onClick={() => { setShowNewCustomer(!showNewCustomer); setNewCustNama(""); setNewCustTelepon(""); }} title="Tambah Customer Baru">
+                <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>add_circle</span>
+              </button>
+            </div>
+            {showNewCustomer && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px", padding: "8px", borderRadius: "8px", background: "var(--color-surface-container-low)" }}>
+                <input className="input-field" style={{ fontSize: "13px" }} placeholder="Nama customer *" value={newCustNama} onChange={(e) => setNewCustNama(e.target.value)} autoFocus />
+                <input className="input-field" style={{ fontSize: "13px" }} placeholder="No. HP" value={newCustTelepon} onChange={(e) => setNewCustTelepon(e.target.value.replace(/\D/g, ""))} />
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <button type="button" className="btn-primary" style={{ padding: "6px 12px", fontSize: "12px" }} onClick={createCustomer}>Buat</button>
+                  <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }} onClick={() => setShowNewCustomer(false)}>Batal</button>
+                </div>
               </div>
-              <div><label className="input-label">Nama Pemesan *</label><input className="input-field" value={form.nama_pemesan} onChange={setText("nama_pemesan")} placeholder="Nama pelanggan" /></div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                <div><label className="input-label">Total Pesanan</label><input className="input-field" inputMode="numeric" value={form.total} onChange={setNumber("total")} placeholder="0" /></div>
-                <div><label className="input-label">DP / Uang Muka</label><input className="input-field" inputMode="numeric" value={form.dp} onChange={setNumber("dp")} placeholder="0" /></div>
-              </div>
-              <div><label className="input-label">Jatuh Tempo</label><input className="input-field" type="date" value={form.jatuh_tempo} onChange={setText("jatuh_tempo")} /></div>
-              <div><label className="input-label">Catatan Item</label><textarea className="input-field" rows={3} value={form.catatan} onChange={setText("catatan")} placeholder="Contoh: 2 box snack, ambil Jumat sore" /></div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Batal</button>
-                <button type="submit" className="btn-primary">Simpan Pesanan</button>
-              </div>
-            </form>
+            )}
           </div>
-        </div>
+          <div>
+            <label className="input-label">Nama Pemesan *</label>
+            <input className="input-field" value={form.nama_pemesan} onChange={setText("nama_pemesan")} placeholder="Nama pemesan" />
+          </div>
+          <div>
+            <label className="input-label">No. HP</label>
+            <input className="input-field" value={form.no_hp} onChange={(e) => setForm((p) => ({ ...p, no_hp: e.target.value.replace(/\D/g, "") }))} placeholder="Auto-fill dari pelanggan" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label className="input-label">Total *</label>
+              <RupiahInput value={form.total} onChange={(val) => setForm((p) => ({ ...p, total: val }))} required />
+            </div>
+            <div>
+              <label className="input-label">DP</label>
+              <RupiahInput value={form.dp} onChange={(val) => setForm((p) => ({ ...p, dp: val }))} />
+            </div>
+          </div>
+          <div>
+            <label className="input-label">Jatuh Tempo</label>
+            <DateField value={form.jatuh_tempo} onChange={(v) => setText("jatuh_tempo")({ target: { value: v } })} />
+          </div>
+          <div>
+            <label className="input-label">Catatan</label>
+            <textarea className="input-field" rows={2} value={form.catatan} onChange={setText("catatan")} placeholder="Opsional" />
+          </div>
+          {(Number(form.total) > 0 || Number(form.dp) > 0) && (
+            <div className="store-profile-help">
+              <span className="material-symbols-outlined">calculate</span>
+              <span>
+                Sisa bayar: <strong>{rupiah(Math.max(0, Number(form.total || 0) - Number(form.dp || 0)))}</strong>
+              </span>
+            </div>
+          )}
+        </FormModal>
       )}
-    </div>
+    </PageShell>
   );
-}
-
-function SummaryCard({ label, value, color }) {
-  return (
-    <div className="card" style={{ padding: "0.75rem", background: "var(--color-surface-container-lowest)" }}>
-      <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{label}</p>
-      <p className="text-headline-sm" style={{ color, marginTop: "0.25rem" }}>{value}</p>
-    </div>
-  );
-}
-
-function PesananCard({ row, onStatus, onDelete }) {
-  const sisaColor = row.sisa > 0 ? "var(--color-warning-amber)" : "var(--color-income-green)";
-  return (
-    <div className="card" style={{ padding: "1rem", borderLeft: `4px solid ${sisaColor}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "flex-start" }}>
-        <div>
-          <p className="text-headline-sm">{row.nama_pemesan}</p>
-          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.2rem" }}>{row.customer_nama || "Pelanggan manual"}</p>
-        </div>
-        <span className="badge" style={{ background: "rgba(6,182,212,0.16)", color: "var(--color-secondary)" }}>{statusLabel[row.status]}</span>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem", marginTop: "0.85rem" }}>
-        <SummaryMini label="Total" value={rupiah(row.total)} />
-        <SummaryMini label="DP" value={rupiah(row.dp)} />
-        <SummaryMini label="Sisa" value={rupiah(row.sisa)} color={sisaColor} />
-      </div>
-      {row.jatuh_tempo && <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginTop: "0.75rem" }}>Jatuh tempo: {row.jatuh_tempo}</p>}
-      {row.catatan && <p className="text-body-md" style={{ marginTop: "0.5rem" }}>{row.catatan}</p>}
-      <div style={{ display: "grid", gridTemplateColumns: row.status === "open" ? "1fr 1fr 44px" : "1fr 44px", gap: "0.5rem", marginTop: "0.85rem" }}>
-        {row.status === "open" && <button className="btn-primary" onClick={() => onStatus(row.id, "selesai")}>Selesai</button>}
-        {row.status === "open" && <button className="btn-secondary" onClick={() => onStatus(row.id, "batal")}>Batal</button>}
-        {row.status !== "open" && <button className="btn-secondary" onClick={() => onStatus(row.id, "open")}>Buka Lagi</button>}
-        <button className="btn-icon" onClick={() => onDelete(row.id)} aria-label="hapus pesanan"><span className="material-symbols-outlined" style={{ color: "var(--color-expense-red)" }}>delete</span></button>
-      </div>
-    </div>
-  );
-}
-
-function SummaryMini({ label, value, color = "var(--color-text-primary)" }) {
-  return <div><p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{label}</p><p className="text-body-md" style={{ color, fontWeight: 700 }}>{value}</p></div>;
 }

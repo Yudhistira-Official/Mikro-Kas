@@ -1,14 +1,13 @@
+use crate::db::DbState;
 /// PPN (Pajak Pertambahan Nilai) settings and calculation
 /// Modes: non (0%), exclude (added on top), include (extracted from price)
-
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use crate::db::DbState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PajakSetting {
-    pub ppn_mode: String,  // "non", "exclude", "include"
+    pub ppn_mode: String, // "non", "exclude", "include"
     pub ppn_persen: f64,
 }
 
@@ -26,8 +25,14 @@ pub fn get_pajak_setting(state: State<DbState>) -> Result<PajakSetting, String> 
     conn.query_row(
         "SELECT ppn_mode, ppn_persen FROM pajak_setting WHERE id = 1",
         [],
-        |row| Ok(PajakSetting { ppn_mode: row.get(0)?, ppn_persen: row.get(1)? }),
-    ).map_err(|e| e.to_string())
+        |row| {
+            Ok(PajakSetting {
+                ppn_mode: row.get(0)?,
+                ppn_persen: row.get(1)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Update PPN mode and rate
@@ -58,11 +63,18 @@ pub fn update_pajak_setting(
 #[tauri::command]
 pub fn hitung_ppn(state: State<DbState>, subtotal_taxable: f64) -> Result<PpnResult, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let setting = conn.query_row(
-        "SELECT ppn_mode, ppn_persen FROM pajak_setting WHERE id = 1",
-        [],
-        |row| Ok(PajakSetting { ppn_mode: row.get(0)?, ppn_persen: row.get(1)? }),
-    ).map_err(|e| e.to_string())?;
+    let setting = conn
+        .query_row(
+            "SELECT ppn_mode, ppn_persen FROM pajak_setting WHERE id = 1",
+            [],
+            |row| {
+                Ok(PajakSetting {
+                    ppn_mode: row.get(0)?,
+                    ppn_persen: row.get(1)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
     let (ppn_amount, grand_total) = match setting.ppn_mode.as_str() {
         "exclude" => {
@@ -76,5 +88,9 @@ pub fn hitung_ppn(state: State<DbState>, subtotal_taxable: f64) -> Result<PpnRes
         _ => (0.0, subtotal_taxable), // "non"
     };
 
-    Ok(PpnResult { ppn_amount, taxable_amount: subtotal_taxable, grand_total })
+    Ok(PpnResult {
+        ppn_amount,
+        taxable_amount: subtotal_taxable,
+        grand_total,
+    })
 }

@@ -226,11 +226,18 @@ pub fn get_neraca_saldo(
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     // Binding parameter dinamis sesuai filter
-    let dari_val = dari.as_deref().unwrap_or("");
-    let sampai_val = sampai.as_deref().unwrap_or("");
+    let mut params_list: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if dari.is_some() {
+        params_list.push(Box::new(dari.as_deref().unwrap_or("")));
+    }
+    if sampai.is_some() {
+        params_list.push(Box::new(sampai.as_deref().unwrap_or("")));
+    }
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        params_list.iter().map(|p| p.as_ref()).collect();
 
     let rows = stmt
-        .query_map(params![dari_val, sampai_val], |row| {
+        .query_map(params_ref.as_slice(), |row| {
             let total_debit: f64 = row.get(4)?;
             let total_kredit: f64 = row.get(5)?;
             let saldo_normal: String = row.get(3)?;

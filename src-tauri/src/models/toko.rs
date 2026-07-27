@@ -5,6 +5,7 @@ pub struct Toko {
     pub id: i64,
     pub nama_toko: String,
     pub qris_statis: Option<String>,
+    pub qris_foto_path: Option<String>,
     pub created_at: String,
     pub alamat: Option<String>,
     pub telepon: Option<String>,
@@ -18,6 +19,7 @@ pub struct Toko {
 pub struct TokoInput {
     pub nama_toko: String,
     pub qris_statis: Option<String>,
+    pub qris_foto_path: Option<String>,
     pub alamat: Option<String>,
     pub telepon: Option<String>,
     pub email: Option<String>,

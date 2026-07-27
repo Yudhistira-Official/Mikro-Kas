@@ -1,11 +1,20 @@
-// Keuangan.jsx — Manajemen Keuangan Toko.
-// Pemasukan otomatis dari penjualan; user hanya input pengeluaran manual.
-// Design ref: Stitch — Manajemen Keuangan.
-import { useState, useEffect } from "react";
+// ============================================================
+// Keuangan.jsx — Manajemen arus kas toko (PageKit).
+//
+// Commands: get_ringkasan_kas, list_kas, create_kas, delete_kas
+// ============================================================
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
+import DateField from "../components/DateField";
+import RupiahInput from "../components/RupiahInput";
+import SearchSelect from "../components/SearchSelect";
+import { formatDateTimeId } from "../utils/dateFormat";
+import {
+  PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge,
+  useSearchFilter, rupiah,
+} from "../components/PageKit";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => {
   const d = new Date();
@@ -18,54 +27,50 @@ const kategoriList = [
   "Sewa Tempat", "Stok Barang", "Transportasi", "Lainnya",
 ];
 
+/**
+ * Halaman manajemen keuangan: ringkasan periode, daftar kas, tambah pengeluaran, export CSV.
+ */
 export default function Keuangan() {
   const { addToast } = useToast();
   const [tab, setTab] = useState("all");
   const [list, setList] = useState([]);
   const [total, setTotal] = useState({ pemasukan: 0, pengeluaran: 0 });
   const [showForm, setShowForm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
   const [dari, setDari] = useState(monthStart);
   const [sampai, setSampai] = useState(today);
   const [kategoriFilter, setKategoriFilter] = useState("all");
 
-  const load = () => {
+  const load = useCallback(() => {
+    setLoading(true);
     const range = { dari, sampai };
-    invoke("get_ringkasan_kas", range).then(setTotal).catch(console.error);
-    invoke("list_kas", range).then(setList).catch(console.error);
-  };
+    Promise.all([
+      invoke("get_ringkasan_kas", range),
+      invoke("list_kas", range),
+    ])
+      .then(([ringkasan, rows]) => {
+        setTotal(ringkasan);
+        setList(rows);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [dari, sampai]);
 
-  // Guard: React 19 crash jika useEffect return Promise (bukan function).
-  // load() return Promise dari .then().catch() → jangan langsung jadi callback useEffect.
-  useEffect(() => { load(); }, [dari, sampai]);
+  useEffect(() => { load(); }, [load]);
 
-  const save = async () => {
-    const jumlah = Number(form.jumlah);
-    if (!jumlah || jumlah <= 0) return addToast("Nominal harus diisi", "error");
-    try {
-      await invoke("create_kas", {
-        input: { tipe: form.tipe, kategori: form.kategori, jumlah, keterangan: form.keterangan.trim() || null, tanggal: null },
-      });
-      addToast("Catatan tersimpan", "success");
-      setShowForm(false);
-      setForm({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
-      load();
-    } catch (e) {
-      addToast(`Gagal: ${e}`, "error");
-    }
-  };
-
-  const hapus = async (id) => {
-    try { await invoke("delete_kas", { id }); load(); addToast("Terhapus", "success"); }
-    catch (e) { addToast(`Gagal: ${e}`, "error"); }
-  };
-
-  const filtered = list
+  const baseRows = list
     .filter((item) => tab === "all" || item.tipe === tab)
     .filter((item) => kategoriFilter === "all" || item.kategori === kategoriFilter);
+
+  const { query, setQuery, filtered } = useSearchFilter(
+    baseRows,
+    (item) => `${item.kategori || ""} ${item.keterangan || ""} ${item.tipe || ""}`
+  );
+
   const saldo = total.pemasukan - total.pengeluaran;
   const kategoriRows = Object.values(filtered.reduce((acc, item) => {
-    // Ringkasan arus kas per kategori agar owner cepat melihat sumber uang keluar/masuk.
     const key = `${item.tipe}:${item.kategori}`;
     acc[key] ||= { tipe: item.tipe, kategori: item.kategori, total: 0, count: 0 };
     acc[key].total += Number(item.jumlah || 0);
@@ -74,6 +79,45 @@ export default function Keuangan() {
   }, {})).sort((a, b) => b.total - a.total);
   const kategoriOptions = ["all", ...Array.from(new Set(list.map((item) => item.kategori))).sort((a, b) => a.localeCompare(b))];
 
+  /** Simpan pengeluaran manual (pemasukan biasanya dari penjualan). */
+  const save = async (e) => {
+    e.preventDefault();
+    const jumlah = Number(form.jumlah);
+    if (!jumlah || jumlah <= 0) return addToast("Nominal harus diisi", "error");
+    setSubmitting(true);
+    try {
+      await invoke("create_kas", {
+        input: {
+          tipe: form.tipe,
+          kategori: form.kategori,
+          jumlah,
+          keterangan: form.keterangan.trim() || null,
+          tanggal: null,
+        },
+      });
+      addToast("Catatan tersimpan", "success");
+      setShowForm(false);
+      setForm({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
+      load();
+    } catch (err) {
+      addToast(`Gagal: ${err}`, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** Hapus entri pengeluaran (bukan retur penjualan). */
+  const hapus = async (id) => {
+    try {
+      await invoke("delete_kas", { id });
+      load();
+      addToast("Terhapus", "success");
+    } catch (err) {
+      addToast(`Gagal: ${err}`, "error");
+    }
+  };
+
+  /** Export baris terfilter ke CSV. */
   const exportCsv = () => {
     if (!filtered.length) return addToast("Tidak ada arus kas untuk diekspor", "error");
     const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
@@ -94,131 +138,166 @@ export default function Keuangan() {
     addToast("CSV arus kas dibuat", "success");
   };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", position: "relative", minHeight: "60dvh" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span className="text-headline-md">Manajemen Keuangan</span>
-        <button className="btn-secondary" onClick={exportCsv} disabled={!filtered.length}>Export CSV</button>
-      </div>
+  const columns = [
+    {
+      key: "info", label: "Transaksi",
+      render: (item) => (
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <span className="material-symbols-outlined" style={{ color: item.tipe === "pemasukan" ? "#047857" : "#B91C1C" }}>
+            {item.tipe === "pemasukan" ? "arrow_downward" : "arrow_upward"}
+          </span>
+          <div>
+            <b>{item.kategori}</b>
+            <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>
+              {formatDateTimeId(item.tanggal)}
+              {item.keterangan ? ` · ${item.keterangan}` : ""}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "tipe", label: "Tipe",
+      render: (item) => (
+        <StatusBadge label={item.tipe} tone={item.tipe === "pemasukan" ? "success" : "danger"} />
+      ),
+    },
+    {
+      key: "jumlah", label: "Jumlah", align: "right",
+      render: (item) => (
+        <b style={{ color: item.tipe === "pemasukan" ? "#047857" : "#B91C1C" }}>
+          {item.tipe === "pemasukan" ? "+" : "-"}{rupiah(item.jumlah)}
+        </b>
+      ),
+    },
+    {
+      key: "aksi", label: "", align: "right",
+      render: (item) => (
+        item.tipe === "pengeluaran" && item.id > 0 && item.kategori !== "Retur Penjualan" ? (
+          <button type="button" className="btn-icon" onClick={() => hapus(item.id)} title="Hapus">
+            <span className="material-symbols-outlined" style={{ color: "#B91C1C" }}>delete</span>
+          </button>
+        ) : null
+      ),
+    },
+  ];
 
-      {/* Filter periode dan kategori untuk laporan arus kas detail. */}
-      <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", padding: "1rem" }}>
-        <div><label className="input-label">Dari</label><input className="input-field" type="date" value={dari} onChange={(e) => setDari(e.target.value)} /></div>
-        <div><label className="input-label">Sampai</label><input className="input-field" type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} /></div>
+  return (
+    <PageShell
+      eyebrow="KEUANGAN"
+      title="Manajemen Keuangan"
+      description="Pantau pemasukan dan pengeluaran per periode. Pemasukan penjualan masuk otomatis; catat pengeluaran manual di sini."
+      actions={
+        <>
+          <button type="button" className="btn-secondary" onClick={exportCsv} disabled={!filtered.length}>Export CSV</button>
+          <button type="button" className="btn-primary" onClick={() => setShowForm(true)}>
+            <span className="material-symbols-outlined">add</span> Pengeluaran
+          </button>
+        </>
+      }
+      stats={[
+        { label: "Saldo periode", value: rupiah(saldo), icon: "account_balance", tone: saldo >= 0 ? "#047857" : "#B91C1C" },
+        { label: "Pemasukan", value: rupiah(total.pemasukan), icon: "trending_up", tone: "#047857" },
+        { label: "Pengeluaran", value: rupiah(total.pengeluaran), icon: "trending_down", tone: "#B91C1C" },
+      ]}
+    >
+      <InfoNote>
+        Filter tanggal memuat ulang ringkasan dari server. Entri retur penjualan tidak bisa dihapus di sini — edit lewat halaman Retur.
+      </InfoNote>
+
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: 16, marginBottom: 12 }}>
+        <div>
+          <label className="input-label">Dari</label>
+          <DateField value={dari} onChange={setDari} />
+        </div>
+        <div>
+          <label className="input-label">Sampai</label>
+          <DateField value={sampai} onChange={setSampai} />
+        </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <label className="input-label">Kategori</label>
-          <select className="input-field" value={kategoriFilter} onChange={(e) => setKategoriFilter(e.target.value)}>
-            {kategoriOptions.map((k) => <option key={k} value={k}>{k === "all" ? "Semua kategori" : k}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* Ringkasan */}
-      <div className="card" style={{ background: "var(--color-primary-container)", color: "white", textAlign: "center", padding: "1.25rem" }}>
-        <p className="text-label-md" style={{ opacity: 0.8 }}>Saldo Bulan Ini</p>
-        <p style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: "34px", margin: "4px 0 12px" }}>{rupiah(saldo)}</p>
-        <div style={{ display: "flex", justifyContent: "space-around" }}>
-          <div><p style={{ color: "var(--color-income-green)", fontWeight: 600, fontSize: "18px" }}>{rupiah(total.pemasukan)}</p><p className="text-label-md" style={{ opacity: 0.8 }}>Pemasukan</p></div>
-          <div><p style={{ color: "var(--color-expense-red)", fontWeight: 600, fontSize: "18px" }}>{rupiah(total.pengeluaran)}</p><p className="text-label-md" style={{ opacity: 0.8 }}>Pengeluaran</p></div>
+          <SearchSelect
+            className="input-field"
+            value={kategoriFilter}
+            onChange={setKategoriFilter}
+            placeholder="Semua kategori"
+            options={kategoriOptions.map((k) => ({ value: k, label: k === "all" ? "Semua kategori" : k }))}
+          />
         </div>
       </div>
 
       {kategoriRows.length > 0 && (
-        <div className="card" style={{ padding: "1rem" }}>
-          <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Ringkasan per Kategori</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+          <p className="text-headline-sm" style={{ marginBottom: 12 }}>Ringkasan per Kategori</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {kategoriRows.slice(0, 6).map((row) => (
-              <div key={`${row.tipe}:${row.kategori}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+              <div key={`${row.tipe}:${row.kategori}`} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                 <div>
-                  <p className="text-body-md" style={{ fontWeight: 700 }}>{row.kategori}</p>
-                  <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{row.count} transaksi · {row.tipe}</p>
+                  <b>{row.kategori}</b>
+                  <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{row.count} transaksi · {row.tipe}</div>
                 </div>
-                <span style={{ fontWeight: 800, color: row.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)" }}>{rupiah(row.total)}</span>
+                <span style={{ fontWeight: 800, color: row.tipe === "pemasukan" ? "#047857" : "#B91C1C" }}>{rupiah(row.total)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div className="filter-row" style={{ marginBottom: "0.5rem" }}>
+      <div className="filter-row" style={{ marginBottom: 12 }}>
         {[
           ["all", "Semua"],
           ["pemasukan", "Pemasukan"],
           ["pengeluaran", "Pengeluaran"],
         ].map(([key, label]) => (
-          <button key={key} className={`filter-chip${tab === key ? " active" : ""}`} onClick={() => setTab(key)}>
-            {label}
-          </button>
+          <button key={key} type="button" className={`filter-chip${tab === key ? " active" : ""}`} onClick={() => setTab(key)}>{label}</button>
         ))}
       </div>
 
-      {/* Daftar transaksi */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "80px" }}>
-          {filtered.map((item) => (
-            <div key={item.id} className="card" style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0.75rem" }}>
-              <div style={{
-                width: "40px", height: "40px", borderRadius: "50%", flexShrink: 0,
-                background: item.tipe === "pemasukan" ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <span className="material-symbols-outlined" style={{ color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)" }}>
-                  {item.tipe === "pemasukan" ? "arrow_downward" : "arrow_upward"}
-                </span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p className="text-headline-sm" style={{ fontSize: "14px" }}>{item.kategori}</p>
-                <p className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{item.tanggal.slice(0, 16)}{item.keterangan ? ` · ${item.keterangan}` : ""}</p>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span className="text-headline-sm" style={{ color: item.tipe === "pemasukan" ? "var(--color-income-green)" : "var(--color-expense-red)", fontSize: "14px" }}>
-                  {item.tipe === "pemasukan" ? "+" : "-"}{rupiah(item.jumlah)}
-                </span>
-                {item.tipe === "pengeluaran" && item.id > 0 && item.kategori !== "Retur Penjualan" && (
-                  <button type="button" className="btn-icon" onClick={() => hapus(item.id)} title="Hapus">
-                    <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "var(--color-expense-red)" }}>delete</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      {filtered.length === 0 && <p className="text-body-md" style={{ textAlign: "center", color: "var(--color-text-secondary)", padding: "2rem 0" }}>Belum ada catatan</p>}
+      <DataPanel
+        searchValue={query}
+        onSearch={setQuery}
+        searchPlaceholder="Cari kategori / keterangan..."
+        onRefresh={load}
+        loading={loading}
+        isEmpty={!loading && filtered.length === 0}
+        emptyIcon="account_balance_wallet"
+        emptyTitle="Belum ada catatan"
+        emptyHint="Ubah rentang tanggal atau tambah pengeluaran."
+      >
+        <DataTable columns={columns} rows={filtered} rowKey={(item) => item.id} />
+      </DataPanel>
 
-      {/* FAB */}
-      <button type="button" onClick={() => setShowForm(true)} style={{
-        position: "fixed", bottom: "calc(96px + env(safe-area-inset-bottom, 0px))", right: "16px",
-        width: "56px", height: "56px", borderRadius: "50%", background: "var(--color-primary-container)", color: "white", border: "none", cursor: "pointer", zIndex: 20,
-        display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 16px rgba(0,32,69,0.3)",
-      }}>
-        <span className="material-symbols-outlined" style={{ fontSize: "28px" }}>add</span>
-      </button>
-
-      {/* Bottom sheet form */}
-      {showForm && <>
-        <div className="modal-overlay" onClick={() => setShowForm(false)} />
-        <div className="keuangan-modal" style={{
-          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
-          background: "var(--color-surface)", borderRadius: "16px 16px 0 0", padding: "1.25rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px))",
-          boxShadow: "0 -8px 24px rgba(0,0,0,0.08)",
-        }}>
-          <p className="text-headline-md" style={{ marginBottom: "0.25rem" }}>Tambah Pengeluaran</p>
-          <p className="text-label-md" style={{ color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
-            Pemasukan otomatis dari transaksi penjualan.
-          </p>
-
-          <input className="input-field" inputMode="numeric" placeholder="Nominal" value={form.jumlah} onChange={(e) => setForm((prev) => ({ ...prev, jumlah: e.target.value.replace(/\D/g, "") }))} style={{ marginBottom: "0.75rem" }} />
-
-          <select className="input-field" value={form.kategori} onChange={(e) => setForm((prev) => ({ ...prev, kategori: e.target.value }))} style={{ marginBottom: "0.75rem" }}>
-            {kategoriList.map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
-
-          <input className="input-field" placeholder="Keterangan (opsional)" value={form.keterangan} onChange={(e) => setForm((prev) => ({ ...prev, keterangan: e.target.value }))} style={{ marginBottom: "1rem" }} />
-
-          <button className="btn-primary" onClick={save} disabled={!form.jumlah} style={{ width: "100%" }}>Simpan</button>
-          <button className="btn-secondary" onClick={() => setShowForm(false)} style={{ width: "100%", marginTop: "0.5rem" }}>Batal</button>
-        </div>
-      </>}
-    </div>
+      {showForm && (
+        <FormModal
+          title="Tambah Pengeluaran"
+          description="Pemasukan penjualan dicatat otomatis. Gunakan form ini untuk biaya operasional."
+          onClose={() => setShowForm(false)}
+          onSubmit={save}
+          submitLabel="Simpan"
+          submitting={submitting}
+        >
+          <label className="input-label">Nominal *</label>
+          <RupiahInput
+            value={form.jumlah}
+            onChange={(val) => setForm((prev) => ({ ...prev, jumlah: val }))}
+            required
+          />
+          <label className="input-label">Kategori</label>
+           <SearchSelect
+             value={form.kategori}
+             onChange={(value) => setForm((prev) => ({ ...prev, kategori: value }))}
+             options={kategoriList.map((k) => ({ value: k, label: k }))}
+             placeholder="Pilih kategori"
+           />
+          <label className="input-label">Keterangan</label>
+          <input
+            className="input-field"
+            placeholder="Opsional"
+            value={form.keterangan}
+            onChange={(e) => setForm((prev) => ({ ...prev, keterangan: e.target.value }))}
+          />
+        </FormModal>
+      )}
+    </PageShell>
   );
 }

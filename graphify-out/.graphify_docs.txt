@@ -1,0 +1,7 @@
+/home/yudhis/CodeProject/MikroKas/AGENTS.md
+/home/yudhis/CodeProject/MikroKas/CHANGELOG.md
+/home/yudhis/CodeProject/MikroKas/Planning.md
+/home/yudhis/CodeProject/MikroKas/README.md
+/home/yudhis/CodeProject/MikroKas/docs/superpowers/plans/2026-07-26-riwayat-stok-search-reversal-plan.md
+/home/yudhis/CodeProject/MikroKas/docs/superpowers/specs/2026-07-26-riwayat-stok-search-reversal-design.md
+/home/yudhis/CodeProject/MikroKas/index.html

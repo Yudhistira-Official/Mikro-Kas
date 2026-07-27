@@ -197,11 +197,12 @@ pub fn bayar_komisi(
 #[tauri::command]
 pub fn update_sales(state: State<DbState>, id: i64, input: SalesInput) -> Result<usize, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let rows = conn.execute(
-        "UPDATE sales SET nama = ?1, kode = ?2, telepon = ?3, email = ?4 WHERE id = ?5",
-        params![input.nama, input.kode, input.telepon, input.email, id],
-    )
-    .map_err(|e| e.to_string())?;
+    let rows = conn
+        .execute(
+            "UPDATE sales SET nama = ?1, kode = ?2, telepon = ?3, email = ?4 WHERE id = ?5",
+            params![input.nama, input.kode, input.telepon, input.email, id],
+        )
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
@@ -216,10 +217,8 @@ pub fn update_sales(state: State<DbState>, id: i64, input: SalesInput) -> Result
 #[tauri::command]
 pub fn delete_sales(state: State<DbState>, id: i64) -> Result<usize, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let rows = conn.execute(
-        "UPDATE sales SET is_active = 0 WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
+    let rows = conn
+        .execute("UPDATE sales SET is_active = 0 WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }

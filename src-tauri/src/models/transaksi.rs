@@ -7,6 +7,8 @@ pub struct ItemInput {
     pub qty: i64,
     /// Satuan pilihan di kasir, misalnya dus/slop. Kosong berarti satuan dasar produk.
     pub satuan_pilihan: Option<String>,
+    /// Override harga beli untuk restock (opsional). Jika diisi, dipakai di transaksi dan update master produk.
+    pub harga_beli: Option<i64>,
 }
 
 /// Payload edit penjualan. Server selalu menghitung ulang harga dan stok.
@@ -40,7 +42,15 @@ pub struct Transaksi {
     #[serde(default)]
     pub supplier_nama: Option<String>,
     #[serde(default)]
+    pub sales_id: Option<i64>,
+    #[serde(default)]
+    pub sales_nama: Option<String>,
+    #[serde(default)]
     pub no_nota: Option<i64>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub sisa: Option<i64>,
 }
 
 /// Detail transaksi + item-itemnya
