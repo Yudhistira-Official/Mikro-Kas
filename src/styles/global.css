@@ -1575,12 +1575,12 @@ select optgroup {
 .sales-page__subtitle { color: var(--color-text-secondary); margin-top: 2px; }
 .sales-page__add { display: flex; align-items: center; gap: 6px; }
 .sales-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.sales-stat-card { display: flex; align-items: center; gap: 12px; background: var(--color-surface-container-lowest); border: 1px solid var(--color-surface-border); border-radius: 14px; padding: 14px 16px; }
+.sales-stat-card { display: flex; align-items: center; gap: 12px; background: var(--color-surface-container); border: 1px solid var(--color-surface-border); border-radius: 14px; padding: 14px 16px; }
 .sales-stat-card .material-symbols-outlined { font-size: 28px; color: var(--color-primary); opacity: 0.8; }
 .sales-stat-card div { display: flex; flex-direction: column; }
 .sales-stat-card span { font-size: 11px; color: var(--color-text-secondary); }
 .sales-stat-card strong { font-size: 18px; font-weight: 700; color: var(--color-text-primary); }
-.sales-panel { background: var(--color-surface-container-lowest); border: 1px solid var(--color-surface-border); border-radius: 16px; overflow: hidden; }
+.sales-panel { background: var(--color-surface-container); border: 1px solid var(--color-surface-border); border-radius: 16px; overflow: hidden; }
 .sales-panel__toolbar { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--color-surface-border); }
 .sales-search { display: flex; align-items: center; gap: 8px; flex: 1; background: var(--color-surface-container-low); border-radius: 10px; padding: 6px 12px; }
 .sales-search .material-symbols-outlined { font-size: 18px; color: var(--color-text-secondary); }
