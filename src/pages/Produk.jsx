@@ -190,13 +190,13 @@ export default function Produk() {
       XLSX.utils.book_append_sheet(wb, ws, "Satuan");
       const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeBinaryFile } = await import("@tauri-apps/plugin-fs");
+      const { writeFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({
         defaultPath: "template-produk.xlsx",
         filters: [{ name: "Excel", extensions: ["xlsx"] }],
       });
       if (!path) return;
-      await writeBinaryFile(path, xlsxBytes);
+      await writeFile(path, xlsxBytes);
       addToast("Template XLSX tersimpan", "success");
     } catch (e) {
       addToast(`Gagal menyimpan template: ${e}`, "error");
@@ -207,7 +207,7 @@ export default function Produk() {
     try {
       const XLSX = await import("xlsx");
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeBinaryFile } = await import("@tauri-apps/plugin-fs");
+      const { writeFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({
         defaultPath: `produk-${new Date().toISOString().slice(0, 10)}.xlsx`,
         filters: [{ name: "Excel", extensions: ["xlsx"] }],
@@ -238,7 +238,7 @@ export default function Produk() {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, "Satuan");
       const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      await writeBinaryFile(path, xlsxBytes);
+      await writeFile(path, xlsxBytes);
       addToast("Data produk berhasil diexport ke XLSX", "success");
     } catch (e) {
       addToast(`Gagal export XLSX: ${e}`, "error");
@@ -248,7 +248,7 @@ export default function Produk() {
   const handleImportCSV = async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const { readTextFile, readBinaryFile } = await import("@tauri-apps/plugin-fs");
+      const { readTextFile, readFile } = await import("@tauri-apps/plugin-fs");
       const selected = await open({
         multiple: false,
         filters: [{ name: "Excel/CSV", extensions: ["xlsx", "csv", "txt"] }],
@@ -257,7 +257,7 @@ export default function Produk() {
       const isXlsx = String(selected).toLowerCase().endsWith(".xlsx");
       if (isXlsx) {
         const XLSX = await import("xlsx");
-        const fileBytes = await readBinaryFile(selected);
+        const fileBytes = await readFile(selected);
         const wb = XLSX.read(fileBytes, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
