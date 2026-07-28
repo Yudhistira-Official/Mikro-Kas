@@ -544,6 +544,7 @@ fn rupiah_int(value: Option<&String>) -> i64 {
 /// Import massal produk dari CSV lokal.
 /// Format kolom: nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum.
 /// Jika SKU sudah ada, data produk diupdate; jika SKU kosong, baris selalu menjadi produk baru.
+/// Jika harga_jual <= 0, produk diimport sebagai draft (is_active=0).
 #[tauri::command]
 pub fn import_produk_csv(
     state: State<DbState>,
@@ -576,11 +577,7 @@ pub fn import_produk_csv(
             continue;
         }
         let harga_jual = rupiah_int(cells.get(4));
-        if harga_jual <= 0 {
-            dilewati += 1;
-            errors.push(format!("Baris {line_no}: harga_jual wajib > 0"));
-            continue;
-        }
+        let is_draft = harga_jual <= 0;
         let sku = cells.get(1).map(|v| v.trim()).filter(|v| !v.is_empty());
         let satuan = cells
             .get(2)
@@ -604,15 +601,15 @@ pub fn import_produk_csv(
         if let Some(id) = existing_id {
             tx.execute(
                 "UPDATE produk SET nama=?1, satuan=?2, harga_beli=?3, harga_jual=?4, stok=?5,
-                 stok_minimum=?6, is_active=1, updated_at=datetime('now') WHERE id=?7",
-                params![nama, satuan, harga_beli, harga_jual, stok, stok_minimum, id],
+                 stok_minimum=?6, is_active=?7, updated_at=datetime('now') WHERE id=?8",
+                params![nama, satuan, harga_beli, harga_jual, stok, stok_minimum, if is_draft { 0 } else { 1 }, id],
             )
             .map_err(|e| format!("Baris {line_no}: gagal update produk: {e}"))?;
             diupdate += 1;
         } else {
             tx.execute(
-                "INSERT INTO produk (nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO produk (nama, sku, satuan, harga_beli, harga_jual, stok, stok_minimum, is_active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     nama,
                     sku,
@@ -620,7 +617,8 @@ pub fn import_produk_csv(
                     harga_beli,
                     harga_jual,
                     stok,
-                    stok_minimum
+                    stok_minimum,
+                    if is_draft { 0 } else { 1 }
                 ],
             )
             .map_err(|e| format!("Baris {line_no}: gagal buat produk: {e}"))?;

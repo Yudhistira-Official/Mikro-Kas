@@ -148,12 +148,55 @@ export default function Produk() {
     }
   };
 
-  // Import produk dari CSV text: dipakai drag-drop CSV.
-  const handleImportText = async (csvText) => {
-    const res = await invoke("import_produk_csv", { csvText });
-    setImportResult(res);
-    addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
-    loadProduk();
+  // Import produk dari content: deteksi otomatis CSV atau XLSX.
+  const handleImportText = async (content) => {
+    try {
+      // Deteksi binary XLSX dari null bytes
+      const isBinary = content.includes("\0") || /[\x00-\x08\x0e-\x1f]/.test(content.slice(0, 1024));
+      if (isBinary) {
+        const XLSX = await import("xlsx");
+        const bytes = new Uint8Array(content.length);
+        for (let i = 0; i < content.length; i++) bytes[i] = content.charCodeAt(i) & 0xff;
+        const wb = XLSX.read(bytes, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(5, jsonData.length); i++) {
+          const row = jsonData[i];
+          if (Array.isArray(row) && (String(row[0] || "").toUpperCase() === "KODEITEM" || String(row[0] || "").toUpperCase() === "NAMAITEM")) {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx === -1) { addToast("Format XLSX tidak sesuai", "error"); return; }
+        const headers = jsonData[headerIdx].map((h) => String(h || "").toUpperCase().trim());
+        const col = (name) => headers.indexOf(name);
+        const csvLines = ["nama,sku,kategori,satuan,harga_beli,harga_jual,stok,stok_minimum"];
+        for (let i = headerIdx + 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!Array.isArray(row)) continue;
+          const nama = String(row[col("NAMAITEM")] || "").trim();
+          if (!nama) continue;
+          const sku = String(row[col("KODEITEM")] || "").trim();
+          const satuan = String(row[col("SATUAN1")] || "pcs").trim() || "pcs";
+          const hargaBeli = String(row[col("HARGAPOKOK1")] || "0").trim();
+          const hargaJual = String(row[col("HARGAJUAL1")] || "0").trim();
+          const stok = String(row[col("STOK")] || "0").trim();
+          const stokMin = String(row[col("STOKMIN")] || "0").trim();
+          csvLines.push(`"${nama.replace(/"/g, '""')}","${sku.replace(/"/g, '""')}","","${satuan.replace(/"/g, '""')}",${hargaBeli},${hargaJual},${stok},${stokMin}`);
+        }
+        const res = await invoke("import_produk_csv", { csvText: csvLines.join("\n") });
+        setImportResult(res);
+        addToast(`Import XLSX: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      } else {
+        const res = await invoke("import_produk_csv", { csvText: content });
+        setImportResult(res);
+        addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      }
+      loadProduk();
+    } catch (e) {
+      addToast(`Gagal import: ${e}`, "error");
+    }
   };
 
   // Header kolom XLSX sesuai template Item.xlsx
