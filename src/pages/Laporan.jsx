@@ -517,7 +517,7 @@ export default function Laporan() {
               ["Nilai Jual", rupiah(ringkasanInv?.nilai_jual)],
             ].map(([label, value]) => <div key={label} className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary-container)", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.8 }}>{label}</p><p className="text-headline-sm" style={{ margin: "4px 0 0 0" }}>{loadingInv ? "…" : value}</p></div>)}
           </div>
-          <div className="card" style={{ padding: "1rem", marginBottom: "1rem", background: "linear-gradient(135deg, var(--color-success-green), var(--color-warning-amber))", color: "white", borderRadius: "14px" }}>
+          <div className="card" style={{ padding: "1rem", marginBottom: "1rem", background: "var(--color-primary)", color: "white", borderRadius: "14px", border: "none" }}>
             <p className="text-label-md" style={{ opacity: 0.85 }}>Potensi Margin</p>
             <p className="text-headline-md" style={{ margin: "4px 0 0" }}>{loadingInv ? "…" : rupiah(ringkasanInv?.potensi_margin)}</p>
           </div>
@@ -528,7 +528,7 @@ export default function Laporan() {
               <tbody>
                 {loadingInv ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center" }}>Memuat inventori...</td></tr> : barisInv.length === 0 ? (
                   <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada data produk aktif.</td></tr>
-                ) : barisInv.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.nama}{row.sku ? <span className="text-label-md" style={{ marginLeft: "6px", color: "var(--color-text-secondary)" }}>#{row.sku}</span> : null}{row.stok <= row.stok_minimum ? <span className="badge badge-warning" style={{ marginLeft: "6px" }}>LOW STOCK</span> : null}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.stok} {row.satuan}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_modal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_jual)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-success-green)" }}>{rupiah(row.margin)}</td></tr>) }
+                ) : barisInv.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.nama}{row.sku ? <span className="text-label-md" style={{ marginLeft: "6px", color: "var(--color-text-secondary)" }}>#{row.sku}</span> : null}{row.stok <= row.stok_minimum ? <span className="badge badge-warning" style={{ marginLeft: "6px" }}>LOW STOCK</span> : null}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.stok} {row.satuan}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_modal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_jual)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-income-green)" }}>{rupiah(row.margin)}</td></tr>) }
               </tbody>
             </table>
           </div>
@@ -560,8 +560,8 @@ export default function Laporan() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-primary-container), var(--color-tertiary-container))", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Total Pembelian</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : rupiah(totalPembelian)}</p></div>
-            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-secondary-container), var(--color-warning-amber))", color: "white", borderRadius: "12px" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Jumlah Restock</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : totalQtyPembelian.toLocaleString("id-ID")}</p></div>
+            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary)", color: "white", borderRadius: "12px", border: "none" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Total Pembelian</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : rupiah(totalPembelian)}</p></div>
+            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary)", color: "white", borderRadius: "12px", border: "none" }}><p className="text-label-md" style={{ opacity: 0.85 }}>Jumlah Restock</p><p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPembelian ? "…" : totalQtyPembelian.toLocaleString("id-ID")}</p></div>
           </div>
 
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Laporan Pembelian Supplier</p>
@@ -587,7 +587,7 @@ export default function Laporan() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "linear-gradient(135deg, var(--color-expense-red), var(--color-tertiary))", color: "white", borderRadius: "12px" }}>
+            <div className="card" style={{ textAlign: "center", padding: "1rem", background: "var(--color-primary)", color: "white", borderRadius: "12px", border: "none" }}>
               <p className="text-label-md" style={{ opacity: 0.85 }}>Total Pengeluaran</p>
               <p className="text-headline-md" style={{ margin: "4px 0 0 0" }}>{loadingPengeluaran ? "…" : rupiah(totalPengeluaran)}</p>
             </div>
@@ -652,7 +652,7 @@ export default function Laporan() {
                         <td style={{ padding: "10px", textAlign: "right" }}>{row.total_qty}</td>
                         <td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_modal)}</td>
                         <td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_harga)}</td>
-                        <td style={{ padding: "10px", textAlign: "right", color: laba >= 0 ? "var(--color-success-green)" : "var(--color-expense-red)", fontWeight: 600 }}>{rupiah(laba)}</td>
+                        <td style={{ padding: "10px", textAlign: "right", color: laba >= 0 ? "var(--color-income-green)" : "var(--color-expense-red)", fontWeight: 600 }}>{rupiah(laba)}</td>
                         <td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-warning-amber)" }}>{persen}</td>
                       </tr>
                     );
