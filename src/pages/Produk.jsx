@@ -148,7 +148,7 @@ export default function Produk() {
     }
   };
 
-  // Import produk CSV dari text: dipakai native picker dan drag-drop desktop.
+  // Import produk dari CSV text: dipakai drag-drop CSV.
   const handleImportText = async (csvText) => {
     const res = await invoke("import_produk_csv", { csvText });
     setImportResult(res);
@@ -156,26 +156,48 @@ export default function Produk() {
     loadProduk();
   };
 
-  // Import produk CSV: baca file via native dialog, kirim teks ke Rust untuk parse + upsert.
-  /**
-   * Menyimpan template CSV produk melalui dialog native agar pengguna mendapat format impor resmi.
-   * Side effects: membuka dialog file dan menulis file CSV jika pengguna memilih lokasi.
-   */
+  // Header kolom XLSX sesuai template Item.xlsx
+  const XLSX_HEADERS = [
+    "KODEITEM", "NAMAITEM", "JENIS", "MEREK", "SATUAN1", "SATUAN2", "SATUAN3", "SATUAN4",
+    "BARCODE1", "BARCODE2", "BARCODE3", "BARCODE4",
+    "KONVERSI1", "KONVERSI2", "KONVERSI3", "KONVERSI4",
+    "HARGAPOKOK1", "HARGAPOKOK2", "HARGAPOKOK3", "HARGAPOKOK4",
+    "HARGAJUAL1", "HARGAJUAL2", "HARGAJUAL3", "HARGAJUAL4",
+    "POIN1", "POIN2", "POIN3", "POIN4",
+    "KOMISISALES1", "KOMISISALES2", "KOMISISALES3", "KOMISISALES4",
+    "STOK", "STOKMIN", "TIPE", "SERIAL", "RAK", "DEPT", "SUPPLIER", "KONSINYASI", "SISTEMHPP", "KETERANGAN",
+  ];
+
   const downloadTemplateCSV = async () => {
     try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+      const data = [
+        ["TIPE", "S", "=> PENTING JANGAN HAPUS BARIS INI"],
+        XLSX_HEADERS,
+        [
+          "CONTOH", "Contoh Produk", "Minuman", "", "BOTOL", "", "", "",
+          "", "", "", "",
+          "1", "0", "0", "0",
+          "5000", "0", "0", "0",
+          "7500", "0", "0", "0",
+          "1", "0", "0", "0",
+          "0", "0", "0", "0",
+          "20", "5", "BARANG", "N", "", "UTM", "", "N", "FIFO", "Contoh produk",
+        ],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, "Satuan");
+      const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const { writeBinaryFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({
-        defaultPath: "template-produk.csv",
-        filters: [{ name: "CSV", extensions: ["csv"] }],
+        defaultPath: "template-produk.xlsx",
+        filters: [{ name: "Excel", extensions: ["xlsx"] }],
       });
       if (!path) return;
-      const csv = [
-        "nama,sku,kategori,satuan,harga_beli,harga_jual,stok,stok_minimum",
-        "Contoh Produk,8999999999999,Minuman,botol,5000,7500,20,5",
-      ].join("\\n");
-      await writeTextFile(path, csv);
-      addToast("Template CSV tersimpan", "success");
+      await writeBinaryFile(path, xlsxBytes);
+      addToast("Template XLSX tersimpan", "success");
     } catch (e) {
       addToast(`Gagal menyimpan template: ${e}`, "error");
     }
@@ -183,37 +205,103 @@ export default function Produk() {
 
   const exportCSV = async () => {
     try {
-      const csv = await invoke("export_produk_csv");
+      const XLSX = await import("xlsx");
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const { writeBinaryFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({
-        defaultPath: `produk-${new Date().toISOString().slice(0, 10)}.csv`,
-        filters: [{ name: "CSV", extensions: ["csv"] }],
+        defaultPath: `produk-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        filters: [{ name: "Excel", extensions: ["xlsx"] }],
       });
       if (!path) return;
-      await writeTextFile(path, `\ufeff${csv}`);
-      addToast("Data produk berhasil diexport", "success");
+      const wb = XLSX.utils.book_new();
+      const rows = [
+        ["TIPE", "S", "=> PENTING JANGAN HAPUS BARIS INI"],
+        XLSX_HEADERS,
+        ...produk.map((p) => [
+          p.sku || "",
+          p.nama || "",
+          "",
+          "",
+          (p.satuan || "pcs").toUpperCase(),
+          "", "", "",
+          "", "", "", "",
+          "1", "0", "0", "0",
+          String(p.harga_beli || 0), "0", "0", "0",
+          String(p.harga_jual || 0), "0", "0", "0",
+          "1", "0", "0", "0",
+          "0", "0", "0", "0",
+          String(p.stok || 0),
+          String(p.stok_minimum || 0),
+          "1", "N", "", "", "", "N", "FIFO", p.kata_kunci || "",
+        ]),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, "Satuan");
+      const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      await writeBinaryFile(path, xlsxBytes);
+      addToast("Data produk berhasil diexport ke XLSX", "success");
     } catch (e) {
-      addToast(`Gagal export CSV: ${e}`, "error");
+      addToast(`Gagal export XLSX: ${e}`, "error");
     }
   };
 
   const handleImportCSV = async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const { readTextFile, readBinaryFile } = await import("@tauri-apps/plugin-fs");
       const selected = await open({
         multiple: false,
-        filters: [{ name: "CSV", extensions: ["csv", "txt"] }],
+        filters: [{ name: "Excel/CSV", extensions: ["xlsx", "csv", "txt"] }],
       });
       if (!selected) return;
-      const csvText = await readTextFile(selected);
-      const res = await invoke("import_produk_csv", { csvText });
-      setImportResult(res);
-      addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      const isXlsx = String(selected).toLowerCase().endsWith(".xlsx");
+      if (isXlsx) {
+        const XLSX = await import("xlsx");
+        const fileBytes = await readBinaryFile(selected);
+        const wb = XLSX.read(fileBytes, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(5, jsonData.length); i++) {
+          const row = jsonData[i];
+          if (Array.isArray(row) && (String(row[0] || "").toUpperCase() === "KODEITEM" || String(row[0] || "").toUpperCase() === "NAMAITEM")) {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx === -1) {
+          addToast("Format XLSX tidak sesuai: baris header tidak ditemukan", "error");
+          return;
+        }
+        const headers = jsonData[headerIdx].map((h) => String(h || "").toUpperCase().trim());
+        const col = (name) => headers.indexOf(name);
+        const csvLines = ["nama,sku,kategori,satuan,harga_beli,harga_jual,stok,stok_minimum"];
+        for (let i = headerIdx + 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!Array.isArray(row)) continue;
+          const nama = String(row[col("NAMAITEM")] || "").trim();
+          if (!nama) continue;
+          const sku = String(row[col("KODEITEM")] || "").trim();
+          const satuan = String(row[col("SATUAN1")] || "pcs").trim() || "pcs";
+          const hargaBeli = String(row[col("HARGAPOKOK1")] || "0").trim();
+          const hargaJual = String(row[col("HARGAJUAL1")] || "0").trim();
+          const stok = String(row[col("STOK")] || "0").trim();
+          const stokMin = String(row[col("STOKMIN")] || "0").trim();
+          csvLines.push(`"${nama.replace(/"/g, '""')}","${sku.replace(/"/g, '""')}","","${satuan.replace(/"/g, '""')}",${hargaBeli},${hargaJual},${stok},${stokMin}`);
+        }
+        const csvText = csvLines.join("\n");
+        const res = await invoke("import_produk_csv", { csvText });
+        setImportResult(res);
+        addToast(`Import XLSX: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      } else {
+        const csvText = await readTextFile(selected);
+        const res = await invoke("import_produk_csv", { csvText });
+        setImportResult(res);
+        addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      }
       loadProduk();
     } catch (e) {
-      addToast(`Gagal import CSV: ${e}`, "error");
+      addToast(`Gagal import: ${e}`, "error");
     }
   };
 
@@ -296,7 +384,7 @@ export default function Produk() {
     <PageShell
       eyebrow="MASTER DATA"
       title="Daftar Item / Barang"
-      description="Kelola katalog produk, stok, harga promo, barcode, dan import CSV."
+      description="Kelola katalog produk, stok, harga promo, barcode, dan import/export Excel."
       actions={
         <>
           <button type="button" className="btn-secondary" onClick={toggleView}>
@@ -305,15 +393,15 @@ export default function Produk() {
           </button>
           <button type="button" className="btn-secondary" onClick={() => { setImportResult(null); setShowImportCSV(true); }}>
             <span className="material-symbols-outlined">upload_file</span>
-            Import CSV
+            Import Excel
           </button>
           <button type="button" className="btn-secondary" onClick={downloadTemplateCSV}>
             <span className="material-symbols-outlined">download</span>
-            Template CSV
+            Template Excel
           </button>
           <button type="button" className="btn-secondary" onClick={exportCSV}>
             <span className="material-symbols-outlined">file_download</span>
-            Export CSV
+            Export Excel
           </button>
           <button type="button" className="btn-primary sales-page__add" onClick={() => { setEditId(null); setShowForm(true); }}>
             <span className="material-symbols-outlined">add</span>
@@ -465,13 +553,13 @@ export default function Produk() {
             <button type="button" className="btn-icon" onClick={() => setShowImportCSV(false)} aria-label="Tutup" style={{ position: "absolute", top: 12, right: 12 }}>
               <span className="material-symbols-outlined">close</span>
             </button>
-            <h3 className="text-headline-md">Import Produk CSV</h3>
+            <h3 className="text-headline-md">Import Produk Excel</h3>
             <p className="text-body-md" style={{ color: "var(--color-text-secondary)", margin: "0.25rem 0 1rem" }}>
-              Format template: nama, sku, kategori, satuan, harga_beli, harga_jual, stok, stok_minimum
+              Format: KODEITEM, NAMAITEM, JENIS, SATUAN1, HARGAPOKOK1, HARGAJUAL1, STOK, STOKMIN
             </p>
             <DropZoneImport
               title="Pilih atau Drop File CSV di sini"
-              subtitle="CSV produk massal"
+              subtitle="CSV/Excel produk massal"
               onText={async (text) => {
                 try {
                   await handleImportText(text);
