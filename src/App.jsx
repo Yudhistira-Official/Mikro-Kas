@@ -236,10 +236,10 @@ function App() {
           <Route path="/transaksi" element={<Transaksi />} />
           <Route path="/kas" element={<Kas />} />
           <Route path="/qris" element={platform === "mobile" ? <Qris /> : <Navigate to="/" replace />} />
-          <Route path="/toko" element={<Profile />} />
+          <Route path="/toko" element={currentUser?.role === "admin" ? <Profile /> : <Navigate to="/" replace />} />
           <Route path="/sistem" element={<Sistem />} />
           <Route path="/qris-setup" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
-          <Route path="/profile" element={<Navigate to="/toko" replace />} />
+          <Route path="/profile" element={<Navigate to={currentUser?.role === "admin" ? "/toko" : "/sistem"} replace />} />
           <Route path="/keuangan" element={<Keuangan />} />
           <Route path="/pembelian" element={<Pembelian />} />
           <Route path="/riwayat-pembelian" element={<RiwayatPembelian />} />
@@ -253,15 +253,15 @@ function App() {
           <Route path="/retur" element={<Retur />} />
           <Route path="/promo" element={<Promo />} />
           <Route path="/pesanan" element={<Pesanan />} />
-          <Route path="/backup-restore" element={<BackupRestore />} />
+          <Route path="/backup-restore" element={currentUser?.role === "admin" ? <BackupRestore /> : <Navigate to="/" replace />} />
           <Route path="/riwayat-stok" element={<RiwayatStok />} />
           <Route path="/shift" element={<Shift />} />
           <Route path="/stock-opname" element={<StockOpname />} />
           <Route path="/advanced" element={<AdvancedModules />} />
           <Route path="/qris-profil" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
-          <Route path="/users" element={<UserManagement />} />
-          <Route path="/nomor-transaksi" element={<NomorTransaksi />} />
-          <Route path="/pajak" element={<PajakSetting />} />
+          <Route path="/users" element={currentUser?.role === "admin" ? <UserManagement /> : <Navigate to="/" replace />} />
+          <Route path="/nomor-transaksi" element={currentUser?.role === "admin" ? <NomorTransaksi /> : <Navigate to="/" replace />} />
+          <Route path="/pajak" element={currentUser?.role === "admin" ? <PajakSetting /> : <Navigate to="/" replace />} />
           <Route path="/multi-harga" element={<MultiHarga />} />
           <Route path="/pengiriman" element={<Pengiriman />} />
           <Route path="/gudang" element={<Gudang />} />
@@ -274,7 +274,7 @@ function App() {
           <Route path="/konsinyasi" element={<Konsinyasi />} />
           <Route path="/perakitan" element={<Perakitan />} />
           <Route path="/hpp" element={<HppManagement />} />
-          <Route path="/database-maintenance" element={<DatabaseMaintenance />} />
+          <Route path="/database-maintenance" element={currentUser?.role === "admin" ? <DatabaseMaintenance /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

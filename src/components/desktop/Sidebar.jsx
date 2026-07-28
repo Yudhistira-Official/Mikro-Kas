@@ -129,9 +129,24 @@ export default function Sidebar({ collapsed, onToggle, currentUser, onLogout, lo
 
   const filteredSections = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return menuSections;
+    
+    // Filter out restricted settings for non-admin
+    let baseSections = menuSections;
+    if (currentUser?.role !== "admin") {
+      baseSections = menuSections.map((sec) => {
+        if (sec.label === "Pengaturan") {
+          return {
+            ...sec,
+            items: sec.items.filter((item) => item.path === "/sistem" || item.path === "/log"),
+          };
+        }
+        return sec;
+      });
+    }
+
+    if (!query) return baseSections;
     // Cari di label menu + desc + title/description PageShell tiap halaman.
-    return menuSections
+    return baseSections
       .map((section) => ({
         ...section,
         items: section.items.filter((item) =>
@@ -139,7 +154,7 @@ export default function Sidebar({ collapsed, onToggle, currentUser, onLogout, lo
         ),
       }))
       .filter((section) => section.items.length > 0);
-  }, [search]);
+  }, [search, currentUser]);
 
   useEffect(() => {
     if (search.trim()) setExpandedSections(filteredSections.map((section) => section.label));

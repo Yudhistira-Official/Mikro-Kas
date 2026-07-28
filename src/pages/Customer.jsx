@@ -425,7 +425,7 @@ export default function Customer() {
             />
             {importResult && (
               <div className="card" style={{ padding: "0.75rem", marginBottom: "0.75rem" }}>
-                <h4 className="text-headline-sm" style={{ color: "#ffffff" }}>Hasil Import:</h4>
+                <h4 className="text-headline-sm" style={{ color: "var(--color-primary)" }}>Hasil Import:</h4>
                 <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Dibuat:</span><strong>{importResult.dibuat}</strong></div>
                 <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Diupdate:</span><strong>{importResult.diupdate}</strong></div>
                 <div style={{ display: "flex", justifyContent: "space-between", margin: "4px 0", fontSize: "13px" }}><span>Dilewati/Gagal:</span><strong style={{ color: "var(--color-expense-red)" }}>{importResult.dilewati}</strong></div>
