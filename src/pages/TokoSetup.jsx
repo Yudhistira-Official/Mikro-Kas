@@ -35,7 +35,7 @@ export default function TokoSetup() {
       setProfiles(Array.isArray(list) ? list : []);
     } catch (error) {
       console.error(error);
-      addToast(`Gagal memuat profil QRIS: ${error}`, "error");
+      { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat profil QRIS: ${_m}`,"error"); };
       setProfiles([]);
     } finally {
       setLoading(false);
@@ -149,7 +149,7 @@ export default function TokoSetup() {
       setShowForm(false);
       await loadProfiles();
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     } finally {
       setSaving(false);
     }
@@ -162,7 +162,7 @@ export default function TokoSetup() {
       addToast("Profil dihapus", "success");
       loadProfiles();
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     }
   };
 
@@ -172,7 +172,7 @@ export default function TokoSetup() {
       addToast("Profil aktif diubah", "success");
       loadProfiles();
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     }
   };
 

@@ -81,7 +81,7 @@ export default function Log() {
         addToast("Gagal simpan; log disalin ke clipboard", "success");
       } catch (clipError) {
         invoke("write_log", { msg: `LOG_UI: gagal simpan dan clipboard: ${String(clipError?.message || clipError).slice(0, 300)}` }).catch(() => {});
-        addToast(`Gagal menyimpan log: ${e}`, "error");
+        { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal menyimpan log: ${_m}`,"error"); };
       }
     }
   };
@@ -95,7 +95,7 @@ export default function Log() {
       addToast("Log disalin ke clipboard", "success");
     } catch (e) {
       invoke("write_log", { msg: `LOG_UI: gagal salin log: ${String(e?.message || e).slice(0, 300)}` }).catch(() => {});
-      addToast(`Gagal salin: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal salin: ${_m}`,"error"); };
     }
   };
 

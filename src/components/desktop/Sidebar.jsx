@@ -8,6 +8,7 @@ import { invoke } from "../../utils/ipc";
 import { setKasirMode } from "../../utils/kasirMode";
 import { useToast } from "../../hooks/useToast";
 import { pageSearchText, pageSnippet } from "../../utils/pageCatalog";
+import { canAccessPath } from "../../utils/permissions";
 
 // Section icons mapping
 const SECTION_ICONS = {
@@ -27,7 +28,7 @@ const menuSections = [
   {
     label: "Utama",
     items: [
-      { path: "/dashboard", label: "Dashboard", icon: "dashboard", desc: "Ringkasan penjualan, keuntungan, dan laporan harian" },
+      { path: "/", label: "Dashboard", icon: "dashboard", desc: "Ringkasan penjualan, keuntungan, dan laporan harian" },
       { path: "/transaksi", label: "Kasir", icon: "point_of_sale", desc: "Transaksi penjualan, checkout, pembayaran tunai dan QRIS" },
     ],
   },
@@ -131,18 +132,12 @@ export default function Sidebar({ collapsed, onToggle, currentUser, onLogout, lo
     const query = search.trim().toLowerCase();
     
     // Filter out restricted settings for non-admin
-    let baseSections = menuSections;
-    if (currentUser?.role !== "admin") {
-      baseSections = menuSections.map((sec) => {
-        if (sec.label === "Pengaturan") {
-          return {
-            ...sec,
-            items: sec.items.filter((item) => item.path === "/sistem" || item.path === "/log"),
-          };
-        }
-        return sec;
-      });
-    }
+    let baseSections = menuSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => canAccessPath(currentUser?.role, item.path)),
+      }))
+      .filter((section) => section.items.length > 0);
 
     if (!query) return baseSections;
     // Cari di label menu + desc + title/description PageShell tiap halaman.

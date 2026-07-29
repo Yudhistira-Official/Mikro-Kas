@@ -2,6 +2,7 @@
 // Dashboard.jsx — Ringkasan bisnis (PageKit)
 // ============================================================
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "../utils/ipc";
 import { PageShell, DataPanel, DataTable, InfoNote, StatusBadge, rupiah } from "../components/PageKit";
@@ -43,6 +44,8 @@ export default function Dashboard() {
   const [produkTab, setProdukTab] = useState("terlaris");
   const [produkLimit, setProdukLimit] = useState(50);
   const [kurangLarisThreshold, setKurangLarisThreshold] = useState(5);
+  const [produkSortBy, setProdukSortBy] = useState("total_qty");
+  const [produkSortOrder, setProdukSortOrder] = useState("desc");
   const [semuaProduk, setSemuaProduk] = useState([]);
   // Popup formula stat
   const [formulaStat, setFormulaStat] = useState(null);
@@ -166,20 +169,29 @@ export default function Dashboard() {
       key: "nama",
       label: "Produk",
       render: (p) => (
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span className="material-symbols-outlined" style={{ color: "var(--color-warning-amber)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--color-warning-amber)", flexShrink: 0 }}>
             star
           </span>
-          <strong>{p.nama}</strong>
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ overflowWrap: "anywhere" }}>{p.nama}</strong>
+            {p.sku ? <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{p.sku}</div> : null}
+          </div>
         </div>
       ),
     },
-    { key: "total_qty", label: "Jumlah", align: "right", render: (p) => `${p.total_qty} terjual` },
+    { key: "total_qty", label: "Jumlah", align: "right", render: (p) => `${Number(p.total_qty || 0)} terjual` },
     {
       key: "total_revenue",
       label: "Omzet",
       align: "right",
-      render: (p) => <strong style={{ color: "var(--color-primary)" }}>{rupiah(p.total_revenue)}</strong>,
+      render: (p) => <strong style={{ color: "var(--color-primary)" }}>{rupiah(p.total_revenue || 0)}</strong>,
+    },
+    {
+      key: "stok",
+      label: "Stok",
+      align: "right",
+      render: (p) => (p.stok != null ? String(p.stok) : "—"),
     },
   ];
 
@@ -209,10 +221,30 @@ export default function Dashboard() {
   ];
 
   const filteredProduk = useMemo(() => {
-    if (produkTab === "terlaris") return (terlaris || []).slice(0, produkLimit);
-    if (produkTab === "kurang_laris") return (semuaProduk || []).filter((p) => p.total_qty < kurangLarisThreshold);
-    return semuaProduk || [];
-  }, [produkTab, terlaris, semuaProduk, produkLimit, kurangLarisThreshold]);
+    let rows;
+    if (produkTab === "terlaris") rows = (terlaris || []).slice(0, produkLimit);
+    else if (produkTab === "kurang_laris") rows = (semuaProduk || []).filter((p) => Number(p.total_qty || 0) < kurangLarisThreshold);
+    else rows = [...(semuaProduk || [])];
+    const key = produkSortBy;
+    const dir = produkSortOrder === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = a[key] ?? a.nama ?? "";
+      const bv = b[key] ?? b.nama ?? "";
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "id") * dir;
+    });
+  }, [produkTab, terlaris, semuaProduk, produkLimit, kurangLarisThreshold, produkSortBy, produkSortOrder]);
+
+  const handleProdukSort = useCallback((key) => {
+    setProdukSortBy((prev) => {
+      if (prev === key) {
+        setProdukSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+        return prev;
+      }
+      setProdukSortOrder(key === "nama" ? "asc" : "desc");
+      return key;
+    });
+  }, []);
 
   return (
     <PageShell
@@ -220,36 +252,39 @@ export default function Dashboard() {
       title={`Selamat datang${toko?.nama_toko ? `, ${toko.nama_toko}` : ""}`}
       description={`Ringkasan bisnis untuk ${customRange || rangeIdx === -1 ? "rentang khusus" : ranges[rangeIdx]?.label?.toLowerCase() || "kustom"}. Ganti rentang di bawah.`}
       actions={
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", background: "var(--color-surface-container-low)", borderRadius: 12, padding: 4, alignItems: "center" }}>
-          {ranges.map((r, i) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", background: "var(--color-surface-container-low)", borderRadius: 12, padding: 4, alignItems: "center" }}>
+            {ranges.map((r, i) => (
+              <button
+                key={r.label}
+                type="button"
+                className={i === rangeIdx && !customRange ? "btn-primary" : "btn-secondary"}
+                style={{ padding: "8px 12px", fontSize: 13 }}
+                onClick={() => { setRangeIdx(i); setCustomRange(false); }}
+              >
+                {r.label}
+              </button>
+            ))}
             <button
-              key={r.label}
               type="button"
-              className={i === rangeIdx && !customRange ? "btn-primary" : "btn-secondary"}
+              className={customRange ? "btn-primary" : "btn-secondary"}
               style={{ padding: "8px 12px", fontSize: 13 }}
-              onClick={() => { setRangeIdx(i); setCustomRange(false); }}
+              onClick={() => setCustomRange(!customRange)}
             >
-              {r.label}
+              Custom
             </button>
-          ))}
-          <button
-            type="button"
-            className={customRange ? "btn-primary" : "btn-secondary"}
-            style={{ padding: "8px 12px", fontSize: 13 }}
-            onClick={() => setCustomRange(true)}
-          >
-            Custom
-          </button>
+          </div>
           {customRange && (
-            <>
-              <div style={{ width: 130 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 4px 0" }}>
+              <span style={{ fontSize: 12, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>Dari</span>
+              <div style={{ width: 140 }}>
                 <DateField value={customDari} onChange={(v) => { setCustomDari(v); setRangeIdx(-1); }} />
               </div>
               <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>s.d.</span>
-              <div style={{ width: 130 }}>
+              <div style={{ width: 140 }}>
                 <DateField value={customSampai} onChange={(v) => { setCustomSampai(v); setRangeIdx(-1); }} />
               </div>
-            </>
+            </div>
           )}
         </div>
       }
@@ -374,7 +409,17 @@ export default function Dashboard() {
                   Semua Produk
                 </button>
               </div>
-              <DataTable columns={terlarisColumns} rows={filteredProduk} rowKey={(p, i) => p.produk_id || i} />
+              <VirtualDataTable
+                columns={terlarisColumns}
+                rows={filteredProduk}
+                rowKey={(p, i) => p.produk_id || p.id || i}
+                sortable={["nama", "total_qty", "total_revenue", "stok"]}
+                sortBy={produkSortBy}
+                sortOrder={produkSortOrder}
+                onSort={handleProdukSort}
+                height="min(50vh, 480px)"
+                emptyMessage="Belum ada data produk"
+              />
             </DataPanel>
 
             <DataPanel

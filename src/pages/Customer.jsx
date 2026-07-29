@@ -9,12 +9,13 @@
 //
 // Design ref: Stitch — "Import Customer CSV" & "Daftar Customer" (violet-cyan).
 // ============================================================
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import DropZoneImport from "../components/DropZoneImport";
 import RupiahInput from "../components/RupiahInput";
 import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
 // Helper: normalisasi nomor telepon ke format wa.me
 // "0812345678" → "62812345678" (ganti 0 depan dengan 62, hapus non-digit)
@@ -35,19 +36,22 @@ export default function Customer() {
   const [editItem, setEditItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
   const [query, setQuery] = useState("");
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE_SIZE = 50;
   const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
 
-  const load = () => {
-    setLoading(true);
-    invoke("list_customer")
-      .then(setList)
-      .catch((e) => addToast(String(e), "error"))
+  const load = (offset = 0, append = false, searchValue = query) => {
+    if (!append) setLoading(true);
+    invoke("list_customer", { search: searchValue || null, limit: PAGE_SIZE, offset })
+      .then((data) => { setList((prev) => append ? [...prev, ...data] : data); setHasMore(data.length >= PAGE_SIZE); })
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    const timer = setTimeout(() => load(0, false, query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const save = async (e) => {
     e.preventDefault();
@@ -217,6 +221,15 @@ export default function Customer() {
     }
   }, [showForm, showImportCSV, detailItem]);
 
+  const filteredCustomers = useMemo(() => list.filter((c) => `${c.nama} ${c.telepon || ""} ${c.alamat || ""}`.toLowerCase().includes(query.toLowerCase())), [list, query]);
+  const customerColumns = [
+    { key: "nama", label: "Pelanggan", render: (c) => <button className="sales-name" onClick={() => setDetailItem(c)}><span className="sales-avatar">{c.nama.charAt(0).toUpperCase()}</span><span><strong>{c.nama}</strong><small>{c.deskripsi_tambahan || "Pelanggan"}</small></span></button> },
+    { key: "telepon", label: "Telepon", render: (c) => c.telepon || "-" },
+    { key: "alamat", label: "Alamat", render: (c) => c.alamat || "-" },
+    { key: "limit_kredit", label: "Limit Kredit", render: (c) => Number(c.limit_kredit) > 0 ? `Rp ${Number(c.limit_kredit).toLocaleString("id-ID")}` : "-" },
+    { key: "aksi", label: "Aksi", render: (c) => <div className="sales-row-actions">{c.telepon && <button className="btn-icon" onClick={() => chatWA(c.telepon)} title="Chat WhatsApp"><span className="material-symbols-outlined">chat</span></button>}<button className="btn-icon" onClick={() => edit(c)} title="Edit"><span className="material-symbols-outlined">edit</span></button><button className="btn-icon" onClick={() => hapus(c.id)} title="Hapus"><span className="material-symbols-outlined">delete</span></button></div> },
+  ];
+
   return (
     <PageShell
       eyebrow="MASTER DATA"
@@ -241,25 +254,7 @@ export default function Customer() {
           <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
           <button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button>
         </div>
-        {loading ? <div className="loading-page"><div className="spinner" /></div> :
-         list.filter(c => `${c.nama} ${c.telepon || ""} ${c.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).length === 0 ?
-          <div className="empty-state"><span className="material-symbols-outlined">group</span><p>Belum ada pelanggan</p></div> : (
-          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Pelanggan</th><th>Telepon</th><th>Alamat</th><th>Limit Kredit</th><th>Aksi</th></tr></thead><tbody>
-            {list.filter(c => `${c.nama} ${c.telepon || ""} ${c.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).map((c) => (
-              <tr key={c.id}>
-                <td><button className="sales-name" onClick={() => setDetailItem(c)}><span className="sales-avatar">{c.nama.charAt(0).toUpperCase()}</span><span><strong>{c.nama}</strong><small>{c.deskripsi_tambahan || "Pelanggan"}</small></span></button></td>
-                <td>{c.telepon || "-"}</td>
-                <td>{c.alamat || "-"}</td>
-                <td>{Number(c.limit_kredit) > 0 ? `Rp ${Number(c.limit_kredit).toLocaleString("id-ID")}` : "-"}</td>
-                <td><div className="sales-row-actions">
-                  {c.telepon && <button className="btn-icon" onClick={() => chatWA(c.telepon)} title="Chat WhatsApp" style={{ color: "#25D366" }}><span className="material-symbols-outlined">chat</span></button>}
-                  <button className="btn-icon" onClick={() => edit(c)} title="Edit"><span className="material-symbols-outlined">edit</span></button>
-                  <button className="btn-icon" onClick={() => hapus(c.id)} style={{ color: "var(--color-expense-red)" }} title="Hapus"><span className="material-symbols-outlined">delete</span></button>
-                </div></td>
-              </tr>
-            ))}
-          </tbody></table></div>
-        )}
+        <VirtualDataTable columns={customerColumns} rows={filteredCustomers} rowKey={(c) => c.id} loading={loading} hasMore={hasMore} onEndReached={() => { if (!loading && hasMore) load(list.length, true, query); }} emptyMessage="Belum ada pelanggan" />
       </section>
 
       {/* MODAL DETAIL CUSTOMER */}
@@ -421,7 +416,7 @@ export default function Customer() {
             <DropZoneImport
               title="Pilih atau Drop File CSV di sini"
               subtitle="Format: nama, telepon, alamat, deskripsi_tambahan"
-              onText={async (text) => { try { await handleImportText(text); } catch(e) { addToast(String(e), "error"); } }}
+              onText={async (text) => { try { await handleImportText(text); } catch(e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; } }}
             />
             {importResult && (
               <div className="card" style={{ padding: "0.75rem", marginBottom: "0.75rem" }}>

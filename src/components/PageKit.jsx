@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 /**
  * PageShell — wrapper standar semua halaman MikroKas.
@@ -118,15 +119,39 @@ export function DataPanel({
  * - `rows`: array data
  * - `rowKey`: fungsi penentu key baris
  */
-export function DataTable({ columns, rows, rowKey }) {
+export function DataTable({ columns, rows, rowKey, sortable, sortBy, sortOrder, onSort }) {
+  const isSortable = (key) => {
+    if (!sortable) return false;
+    if (Array.isArray(sortable)) return sortable.includes(key);
+    return true;
+  };
   return (
     <div className="sales-table-wrap">
       <table className="sales-table">
         <thead>
           <tr>
-            {columns.map((column) => (
-              <th key={column.key} style={column.align ? { textAlign: column.align } : undefined}>{column.label}</th>
-            ))}
+            {columns.map((column) => {
+              const canSort = isSortable(column.key);
+              const active = sortBy === column.key;
+              return (
+                <th
+                  key={column.key}
+                  style={{
+                    textAlign: column.align || undefined,
+                    cursor: canSort ? "pointer" : undefined,
+                    userSelect: canSort ? "none" : undefined,
+                  }}
+                  onClick={canSort && onSort ? () => onSort(column.key) : undefined}
+                >
+                  {column.label}
+                  {canSort && active && (
+                    <span className="material-symbols-outlined" style={{ fontSize: 14, verticalAlign: "middle", marginLeft: 4 }}>
+                      {sortOrder === "desc" ? "expand_less" : "expand_more"}
+                    </span>
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

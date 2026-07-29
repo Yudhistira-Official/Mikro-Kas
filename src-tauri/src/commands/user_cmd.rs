@@ -1,4 +1,5 @@
 use crate::db::DbState;
+use rand::Rng;
 use rusqlite::params;
 /// Multi-user system with role-based access control.
 /// Roles: admin (full), supervisor (all except user management), kasir (POS only).
@@ -353,13 +354,14 @@ mod tests {
         let result = verify_security_answers_internal(&conn, user_id, vec!["doggo".into(), "pizza".into()]).unwrap();
         assert!(result.success);
 
-        // Verify password now reset to "admin"
+        // Verify password now reset to generated temporary password
+        let temporary_password = result.temporary_password.as_deref().unwrap();
         let pwd_hash2: String = conn.query_row(
             "SELECT password_hash FROM users WHERE id = ?1",
             rusqlite::params![user_id],
             |row| row.get(0),
         ).unwrap();
-        assert!(bcrypt::verify("admin", &pwd_hash2).unwrap());
+        assert!(bcrypt::verify(temporary_password, &pwd_hash2).unwrap());
     }
 
     #[test]
@@ -544,11 +546,13 @@ pub struct PublicQuestion {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VerifyResult {
     pub success: bool,
+    pub temporary_password: Option<String>,
 }
 
-fn require_admin_internal(auth: &AuthState) -> Result<(), String> {
+pub fn require_admin_internal(auth: &AuthState) -> Result<(), String> {
     let guard = auth.0.lock().map_err(|e| e.to_string())?;
     match &*guard {
         Some(user) if user.role == "admin" && user.is_active => Ok(()),
@@ -556,7 +560,24 @@ fn require_admin_internal(auth: &AuthState) -> Result<(), String> {
     }
 }
 
-fn require_admin(auth: &State<AuthState>) -> Result<(), String> {
+pub fn require_authenticated(auth: &AuthState) -> Result<(), String> {
+    let guard = auth.0.lock().map_err(|e| e.to_string())?;
+    match &*guard {
+        Some(_) => Ok(()),
+        _ => Err("Akses ditolak: harus login".to_string()),
+    }
+}
+
+pub fn require_stock_audit(auth: &AuthState) -> Result<(), String> {
+    let guard = auth.0.lock().map_err(|e| e.to_string())?;
+    match &*guard {
+        Some(user) if user.is_active && matches!(user.role.as_str(), "admin" | "supervisor" | "inventori") => Ok(()),
+        Some(_) => Err("Akses ditolak: audit stok hanya untuk admin, supervisor, atau inventori".to_string()),
+        None => Err("Akses ditolak: harus login".to_string()),
+    }
+}
+
+pub fn require_admin(auth: &State<AuthState>) -> Result<(), String> {
     require_admin_internal(auth.inner())
 }
 
@@ -571,6 +592,9 @@ pub fn create_user_internal(
     }
     if req.password.len() < 6 {
         return Err("Password min 6 karakter".into());
+    }
+    if !matches!(req.role.as_str(), "admin" | "supervisor" | "inventori" | "kasir") {
+        return Err("Role tidak valid".into());
     }
 
     // Admin users must have at least 1 security question
@@ -637,7 +661,7 @@ pub fn update_user_internal(
     conn: &rusqlite::Connection,
     req: UpdateUserRequest,
 ) -> Result<(), String> {
-    if req.role != "admin" && req.role != "supervisor" && req.role != "kasir" {
+    if !matches!(req.role.as_str(), "admin" | "supervisor" | "inventori" | "kasir") {
         return Err("Role tidak valid".into());
     }
 
@@ -788,7 +812,8 @@ pub fn logout_user(auth: State<AuthState>) -> Result<(), String> {
 
 /// List all users (without password hash)
 #[tauri::command]
-pub fn list_users(state: State<DbState>) -> Result<Vec<User>, String> {
+pub fn list_users(state: State<DbState>, auth: State<AuthState>) -> Result<Vec<User>, String> {
+    require_admin(&auth)?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, username, nama_lengkap, role, is_active FROM users ORDER BY created_at DESC"
@@ -957,23 +982,29 @@ pub fn verify_security_answers_internal(
         .map_err(|e| e.to_string())?;
 
     if stored.len() != answers.len() {
-        return Ok(VerifyResult { success: false });
+        return Ok(VerifyResult { success: false, temporary_password: None });
     }
 
     for (s, a) in stored.iter().zip(answers.iter()) {
         if s != &a.trim().to_lowercase() {
-            return Ok(VerifyResult { success: false });
+            return Ok(VerifyResult { success: false, temporary_password: None });
         }
     }
 
-    let hash = bcrypt::hash("admin", 10).map_err(|e| e.to_string())?;
+    // Enforce minimum length for reset password and update at once
+    let new_password: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(12)
+        .map(char::from)
+        .collect();
+    let hash = bcrypt::hash(&new_password, 10).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE id = ?2",
         params![hash, user_id],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(VerifyResult { success: true })
+    Ok(VerifyResult { success: true, temporary_password: Some(new_password) })
 }
 
 #[tauri::command]

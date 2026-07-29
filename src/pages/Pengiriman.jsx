@@ -1,25 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
-import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import { PageShell, FormModal, InfoNote, useSearchFilter, rupiah } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import { formatDateId } from "../utils/dateFormat";
 import SearchSelect from "../components/SearchSelect";
 
 export default function Pengiriman() {
   const { addToast } = useToast();
   const [data, setData] = useState([]);
+  const [hasMore, setHasMore] = useState(true);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ transaksi_id: "", alamat_kirim: "", kota: "", provinsi: "", kode_pos: "", ekspedisi: "", no_resi: "", catatan: "" });
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (offset = 0, append = false) => {
+    if (!append) setLoading(true);
     try {
-      const rows = await invoke("list_pengiriman");
-      setData(Array.isArray(rows) ? rows : []);
+      const rows = await invoke("list_pengiriman", { limit: 50, offset });
+      const next = Array.isArray(rows) ? rows : [];
+      setData((current) => append ? [...current, ...next] : next);
+      setHasMore(next.length === 50);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }
@@ -64,7 +68,7 @@ export default function Pengiriman() {
       addToast("Pengiriman ditambahkan", "success");
       load();
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     }
   };
 
@@ -74,12 +78,21 @@ export default function Pengiriman() {
       addToast("Status pengiriman diperbarui", "success");
       load();
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     }
   };
 
   const statusLabel = { diproses: "Diproses", dikirim: "Dikirim", diterima: "Diterima", batal: "Batal" };
   const statusColor = { diproses: "#f59e0b", dikirim: "#3b82f6", diterima: "#22c55e", batal: "#ef4444" };
+  const columns = [
+    { key: "transaksi_id", label: "Transaksi", render: (item) => <div className="sales-name" style={{ cursor: "default" }}><span className="sales-avatar"><span className="material-symbols-outlined" style={{ fontSize: 16 }}>receipt_long</span></span><span><strong>#{item.transaksi_id}</strong><small>{item.catatan || "Tanpa catatan"}</small></span></div> },
+    { key: "tujuan", label: "Tujuan", render: (item) => <><strong>{item.kota || "-"}</strong><small style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 11 }}>{item.provinsi || item.alamat_kirim || "-"}</small></> },
+    { key: "ekspedisi", label: "Ekspedisi" },
+    { key: "no_resi", label: "No. Resi", render: (item) => item.no_resi || "-" },
+    { key: "tgl_kirim", label: "Tgl. Kirim", render: (item) => formatDateId(item.tgl_kirim) },
+    { key: "status", label: "Status", render: (item) => <span style={{ color: statusColor[item.status] || "var(--color-text-secondary)", fontWeight: 700, fontSize: 12 }}>{statusLabel[item.status] || item.status}</span> },
+    { key: "aksi", label: "Aksi", render: (item) => <SearchSelect style={{ minWidth: 140 }} value={item.status} onChange={(value) => updateStatus(item.id, value)} options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))} placeholder="Status" /> },
+  ];
 
   return (
     <PageShell
@@ -106,17 +119,15 @@ export default function Pengiriman() {
           <button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button>
         </div>
         {loading ? <div className="loading-page"><div className="spinner" /></div> : filtered.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">local_shipping</span><p>Belum ada data pengiriman</p></div> : (
-          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Transaksi</th><th>Tujuan</th><th>Ekspedisi</th><th>No. Resi</th><th>Tgl. Kirim</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
-            {filtered.map((item) => <tr key={item.id}>
-              <td><div className="sales-name" style={{ cursor: "default" }}><span className="sales-avatar"><span className="material-symbols-outlined" style={{ fontSize: 16 }}>receipt_long</span></span><span><strong>#{item.transaksi_id}</strong><small>{item.catatan || "Tanpa catatan"}</small></span></div></td>
-              <td><strong>{item.kota || "-"}</strong><small style={{ display: "block", color: "var(--color-text-secondary)", fontSize: 11 }}>{item.provinsi || item.alamat_kirim || "-"}</small></td>
-              <td>{item.ekspedisi || "-"}</td>
-              <td style={{ fontWeight: 600 }}>{item.no_resi || "-"}</td>
-              <td style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>{formatDateId(item.tgl_kirim)}</td>
-              <td><span style={{ color: statusColor[item.status] || "var(--color-text-secondary)", fontWeight: 700, fontSize: 12 }}>{statusLabel[item.status] || item.status}</span></td>
-              <td><div className="sales-row-actions"><SearchSelect style={{ minWidth: 140 }} value={item.status} onChange={(value) => updateStatus(item.id, value)} options={[{ value: "diproses", label: "Diproses" }, { value: "dikirim", label: "Dikirim" }, { value: "diterima", label: "Diterima" }, { value: "batal", label: "Batal" }]} placeholder="Status" /></div></td>
-            </tr>)}
-          </tbody></table></div>
+          <VirtualDataTable
+            columns={columns}
+            rows={filtered}
+            rowKey={(item) => item.id}
+            loading={loading}
+            hasMore={hasMore}
+            onEndReached={() => { if (!loading && hasMore) load(data.length, true); }}
+            emptyMessage="Belum ada data pengiriman"
+          />
         )}
       </section>
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../components/desktop/Sidebar";
 import { isKasirMode, onKasirModeChange, setKasirMode } from "../utils/kasirMode";
-import { applyWindowMode, toggleFullscreen } from "../utils/windowMode";
+import { toggleFullscreen } from "../utils/windowMode";
 
 const SHORTCUT_MAP = {
   F1: "/transaksi",
@@ -40,6 +40,13 @@ export default function DesktopLayout({ currentUser, onLogout, loggingOut }) {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // F11 selalu aktif (termasuk mode kasir) — toggle fullscreen runtime.
+      if (e.key === "F11") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFullscreen().catch(() => {});
+        return;
+      }
       if (kasirMode && e.ctrlKey && e.key === "Escape") {
         e.preventDefault();
         setKasirMode(false);
@@ -47,18 +54,14 @@ export default function DesktopLayout({ currentUser, onLogout, loggingOut }) {
         return;
       }
       if (kasirMode) return;
-      if (e.key === "F11") {
-        e.preventDefault();
-        toggleFullscreen();
-        return;
-      }
       if (SHORTCUT_MAP[e.key]) {
         e.preventDefault();
         navigate(SHORTCUT_MAP[e.key]);
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // capture: true agar F11 tidak dilahap handler lain / browser default
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [navigate, kasirMode]);
 
   return (

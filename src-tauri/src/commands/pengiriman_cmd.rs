@@ -85,19 +85,26 @@ pub fn update_pengiriman_status(
 }
 
 #[tauri::command]
-pub fn list_pengiriman(state: State<DbState>) -> Result<Vec<Pengiriman>, String> {
+pub fn list_pengiriman(
+    state: State<DbState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Pengiriman>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let offset = offset.unwrap_or(0).max(0);
     let mut stmt = conn
         .prepare(
             "SELECT id, transaksi_id, alamat_kirim, kota, provinsi, kode_pos, ekspedisi, no_resi,
                     tgl_kirim, tgl_diterima, status, catatan
              FROM pengiriman
-             ORDER BY id DESC",
+             ORDER BY id DESC
+             LIMIT ?1 OFFSET ?2",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params![limit, offset], |row| {
             Ok(Pengiriman {
                 id: row.get(0)?,
                 transaksi_id: row.get(1)?,

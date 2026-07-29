@@ -57,7 +57,7 @@ export default function Kas() {
       addToast("Entri dihapus", "success");
       load();
     } catch (e) {
-      addToast(`Gagal: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     }
   };
 
@@ -86,7 +86,7 @@ export default function Kas() {
       setForm({ tipe: "pemasukan", kategori: "", jumlah: "", keterangan: "", tanggal: today() });
       load();
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     } finally {
       setSaving(false);
     }

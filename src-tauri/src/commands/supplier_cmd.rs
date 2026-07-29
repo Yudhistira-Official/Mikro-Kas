@@ -16,12 +16,23 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Supplier> {
 }
 
 #[tauri::command]
-pub fn list_supplier(state: State<DbState>) -> Result<Vec<Supplier>, String> {
+pub fn list_supplier(
+    state: State<DbState>,
+    search: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Supplier>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, nama, telepon, alamat, deskripsi_tambahan, created_at FROM supplier ORDER BY lower(nama) ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
+    let mut sql = String::from("SELECT id, nama, telepon, alamat, deskripsi_tambahan, created_at FROM supplier WHERE 1=1");
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut idx = 0;
+    if let Some(value) = search.filter(|s| !s.trim().is_empty()) { idx += 1; sql.push_str(&format!(" AND (nama LIKE ?{idx} OR COALESCE(telepon,'') LIKE ?{idx} OR COALESCE(alamat,'') LIKE ?{idx})")); values.push(Box::new(format!("%{}%", value.trim()))); }
+    sql.push_str(" ORDER BY lower(nama) ASC");
+    if let Some(value) = limit { idx += 1; sql.push_str(&format!(" LIMIT ?{idx}")); values.push(Box::new(value)); }
+    if let Some(value) = offset { idx += 1; sql.push_str(&format!(" OFFSET ?{idx}")); values.push(Box::new(value)); }
+    let params_ref: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params_ref.as_slice(), map_row).map_err(|e| e.to_string())?;
     let mut result = Vec::new();
     for row in rows {
         result.push(row.map_err(|e| e.to_string())?);

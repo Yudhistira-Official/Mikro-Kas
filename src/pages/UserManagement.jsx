@@ -16,6 +16,7 @@ function roleTone(role) {
   if (role === "admin") return "primary";
   if (role === "supervisor") return "warning";
   if (role === "kasir") return "success";
+  if (role === "inventori") return "primary";
   return "neutral";
 }
 
@@ -362,7 +363,7 @@ export default function UserManagement() {
           <SearchSelect
             value={form.role}
             onChange={(value) => setField("role", value)}
-            options={[{ value: "kasir", label: "Kasir — akses POS saja" }, { value: "supervisor", label: "Supervisor — semua kecuali manajemen user" }, { value: "admin", label: "Admin — akses penuh" }]}
+            options={[{ value: "kasir", label: "Kasir — akses POS, shift, dan laporan" }, { value: "inventori", label: "Inventori — produk, gudang, pembelian, dan stok" }, { value: "supervisor", label: "Supervisor — semua kecuali manajemen user" }, { value: "admin", label: "Admin — akses penuh" }]}
             placeholder="Pilih role"
           />
           {errors.role && (

@@ -35,14 +35,18 @@ fn map_pesanan(row: &rusqlite::Row<'_>) -> rusqlite::Result<PesananCustomer> {
 pub fn list_pesanan_customer(
     state: State<DbState>,
     status: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<PesananCustomer>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut sql = String::from(PESANAN_SELECT);
     let mut status_filter = status.unwrap_or_else(|| "open".to_string());
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let offset = offset.unwrap_or(0).max(0);
     if status_filter == "semua" {
-        sql.push_str(" ORDER BY p.created_at DESC, p.id DESC");
+        sql.push_str(" ORDER BY p.created_at DESC, p.id DESC LIMIT ?1 OFFSET ?2");
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], map_pesanan).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![limit, offset], map_pesanan).map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row.map_err(|e| e.to_string())?);
@@ -52,10 +56,10 @@ pub fn list_pesanan_customer(
     if !matches!(status_filter.as_str(), "open" | "selesai" | "batal") {
         status_filter = "open".to_string();
     }
-    sql.push_str(" WHERE p.status = ?1 ORDER BY p.created_at DESC, p.id DESC");
+    sql.push_str(" WHERE p.status = ?1 ORDER BY p.created_at DESC, p.id DESC LIMIT ?2 OFFSET ?3");
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![status_filter], map_pesanan)
+        .query_map(params![status_filter, limit, offset], map_pesanan)
         .map_err(|e| e.to_string())?;
     let mut result = Vec::new();
     for row in rows {

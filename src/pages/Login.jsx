@@ -15,6 +15,7 @@ export default function Login({ onLogin }) {
   const [forgotAnswers, setForgotAnswers] = useState([]);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -66,8 +67,9 @@ export default function Login({ onLogin }) {
         username: forgotUsername.trim(),
         answers: forgotAnswers.map((a) => a.trim()),
       });
-      if (result.success) {
-        setForgotStep(3);
+       if (result.success) {
+         setTemporaryPassword(result.temporaryPassword || "");
+         setForgotStep(3);
       } else {
         setForgotError("Jawaban tidak sesuai. Silakan coba lagi.");
       }
@@ -85,6 +87,7 @@ export default function Login({ onLogin }) {
     setForgotQuestions([]);
     setForgotAnswers([]);
     setForgotError("");
+    setTemporaryPassword("");
   };
 
   return (
@@ -191,7 +194,7 @@ export default function Login({ onLogin }) {
               <>
                 <h2 className="text-headline-sm" style={{ marginBottom: 8, color: "var(--color-success, #047857)" }}>Password Direset</h2>
                 <p className="text-body-md" style={{ marginBottom: 16 }}>
-                  Password telah direset ke <strong>admin</strong>. Silakan login menggunakan username dan password default tersebut.
+                   Password sementara Anda: <strong>{temporaryPassword}</strong>. Simpan, login, lalu segera ubah password.
                 </p>
                 <button type="button" className="btn-primary" onClick={resetForgot} style={{ width: "100%" }}>
                   Kembali ke Login

@@ -133,23 +133,12 @@ body {
 
 /* ========== Cards ========== */
 .card {
-  background: var(--color-primary);
-  color: white;
+  background: white;
+  color: var(--color-text-primary);
   border-radius: 10px;
   padding: 1rem;
   box-shadow: none;
-  border: 1px solid var(--color-primary);
-}
-.card:not([style*="background"]) [style*="color: var(--color-primary)"],
-.card:not([style*="background"]) [style*="color:var(--color-primary)"] {
-  color: #FEF08A !important; /* light yellow for visibility */
-}
-.card:not([style*="background"]) .text-label-md {
-  color: rgba(255, 255, 255, 0.75) !important;
-}
-.card[style*="background"] {
-  color: var(--color-text-primary);
-  border-color: var(--color-surface-border);
+  border: 1px solid var(--color-surface-border);
 }
 
 /* ========== Buttons — flat ========== */
@@ -340,7 +329,7 @@ select optgroup {
   border-radius: 16px;
   padding: 1.5rem;
   width: 100%;
-  max-width: 480px;
+  max-width: 670px;
   max-height: 90vh; /* tinggi maksimal 90% viewport */
   display: flex;
   flex-direction: column;
@@ -580,7 +569,7 @@ select optgroup {
     height: 100vh;
     overflow: hidden;
   }
-  
+
   .sidebar {
     width: 240px;
     height: 100vh;
@@ -591,18 +580,18 @@ select optgroup {
     transition: width 0.2s;
     overflow-y: auto;
   }
-  
+
   .sidebar.collapsed {
     width: 64px;
   }
-  
+
   .sidebar-header {
     padding: 16px;
     border-bottom: 1px solid var(--color-surface-border);
     display: flex;
     justify-content: flex-end;
   }
-  
+
   .sidebar-toggle {
     background: none;
     border: none;
@@ -611,7 +600,7 @@ select optgroup {
     border-radius: 8px;
     color: var(--color-on-surface-variant);
   }
-  
+
   .sidebar-toggle:hover {
     background: var(--color-surface-container-high);
   }
@@ -704,11 +693,11 @@ select optgroup {
     flex: 1;
     padding: 8px;
   }
-  
+
   .sidebar-section {
     margin-bottom: 8px;
   }
-  
+
   .sidebar-section-label {
     display: flex;
     justify-content: space-between;
@@ -725,21 +714,21 @@ select optgroup {
     cursor: pointer;
     border-radius: 4px;
   }
-  
+
   .sidebar-section-label:hover {
     background: var(--color-surface-container-high);
   }
-  
+
   .sidebar.collapsed .sidebar-section-label {
     display: none;
   }
-  
+
   .sidebar-items {
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
-  
+
   .sidebar-item {
     display: flex;
     align-items: center;
@@ -752,26 +741,26 @@ select optgroup {
     font-size: 14px;
     font-weight: 500;
   }
-  
+
   .sidebar-item:hover {
     background: var(--color-surface-container-high);
   }
-  
+
   .sidebar-item.active {
     background: var(--color-primary-container);
     color: var(--color-primary);
     border-left: 3px solid var(--color-primary);
   }
-  
+
   .sidebar.collapsed .sidebar-item {
     justify-content: center;
     padding: 10px;
   }
-  
+
   .sidebar.collapsed .sidebar-item span:not(.material-symbols-outlined) {
     display: none;
   }
-  
+
   .desktop-main {
     flex: 1;
     height: 100vh;
@@ -781,11 +770,11 @@ select optgroup {
     margin-left: 240px;
     transition: margin-left 0.2s;
   }
-  
+
   .desktop-main.sidebar-collapsed {
     margin-left: 64px;
   }
-  
+
   .top-header {
     display: none;
   }
@@ -797,7 +786,7 @@ select optgroup {
     max-width: 1200px;
     margin: 0 auto;
   }
-  
+
   .advanced-header {
     display: flex;
     justify-content: space-between;
@@ -806,13 +795,13 @@ select optgroup {
     padding-bottom: 24px;
     border-bottom: 1px solid var(--color-surface-border);
   }
-  
+
   .advanced-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 16px;
   }
-  
+
   .advanced-card {
     display: flex;
     align-items: center;
@@ -820,11 +809,11 @@ select optgroup {
     padding: 20px;
     transition: all 0.2s;
   }
-  
+
   .advanced-card:hover {
     box-shadow: none;
   }
-  
+
   .advanced-card-icon {
     width: 48px;
     height: 48px;
@@ -836,11 +825,11 @@ select optgroup {
     color: var(--color-primary);
     flex-shrink: 0;
   }
-  
+
   .advanced-card-icon .material-symbols-outlined {
     font-size: 28px;
   }
-  
+
   .badge-success {
     background: var(--color-income-green);
     color: white;
@@ -1116,6 +1105,44 @@ select optgroup {
   }
 }
 
+/* ========== Kasir — Mobile Product Area ========== */
+.kasir-products-area {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.kasir-products-area::-webkit-scrollbar {
+  width: 6px;
+}
+.kasir-products-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kasir-products-area::-webkit-scrollbar-thumb {
+  background: var(--color-surface-border);
+  border-radius: 3px;
+}
+
+/* Scrollbar global — Produk panel, tables, dll */
+.sales-panel__scroll {
+  scrollbar-width: thin;
+}
+.sales-panel__scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sales-panel__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sales-panel__scroll::-webkit-scrollbar-thumb {
+  background: var(--color-surface-border);
+  border-radius: 3px;
+}
+
 /* ========== Kasir Desktop Split-Pane ========== */
 @media (min-width: 768px) {
   .desktop-main:has(.kasir-page) {
@@ -1147,7 +1174,8 @@ select optgroup {
   .kasir-products-area {
     grid-column: 1;
     grid-row: 2;
-    overflow-y: auto;
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
     min-height: 0;
     height: 100%;
     align-self: stretch;
@@ -1187,6 +1215,8 @@ select optgroup {
 
   .kasir-products-area .card {
     transition: all 0.2s ease;
+    content-visibility: auto;
+    contain-intrinsic-size: 120px;
   }
 
   .kasir-products-area .card:hover {
@@ -1290,6 +1320,34 @@ select optgroup {
     text-align: center;
     padding: 6px 4px;
     font-size: 13px;
+  }
+
+  /* Service + Ongkir (+ PPN) di panel keranjang: sejajar, rata kanan, wrap di layar sempit */
+  .kasir-fee-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+    align-items: end;
+  }
+  .kasir-fee-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .kasir-fee-label {
+    font-size: 10px;
+    color: var(--color-text-secondary);
+    text-align: right;
+  }
+  .kasir-fee-ppn {
+    padding: 8px 10px;
+    font-size: 12px;
+    background: var(--color-surface-container-high);
+    border-radius: 6px;
+    text-align: right;
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
   }
 
   .kasir-actions-section {
@@ -1505,43 +1563,12 @@ select optgroup {
 .kasir-page--focus {
   height: 100vh;
 }
-.theme-options {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-}
-.theme-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 96px;
-  padding: 16px;
-  border: 1px solid var(--color-surface-border);
-  border-radius: 12px;
-  background: var(--color-surface-bright);
-  cursor: pointer;
-  color: var(--color-text-primary);
-  transition: flex-grow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.theme-card .material-symbols-outlined {
-  font-size: 28px;
-  color: var(--color-primary);
-}
-.theme-card strong {
-  font-size: 15px;
-}
-.theme-card.active {
-  flex: 1.8;
-  border-color: var(--color-primary);
-  background: var(--color-primary-fixed);
-  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.15);
-}
-.theme-card.active strong {
-  color: var(--color-primary);
-}
+.hardware-settings { display: flex; flex-direction: column; gap: 12px; padding: 1.25rem; }
+.hardware-settings__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hardware-card { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--color-surface-border); border-radius: 12px; background: var(--color-surface-bright); }
+.hardware-card h3 { font-size: 15px; }
+.hardware-card .text-label-md { color: var(--color-text-secondary); }
+.hardware-settings__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .window-mode-options {
   display: grid;
@@ -1598,10 +1625,28 @@ select optgroup {
 .sales-search .material-symbols-outlined { font-size: 18px; color: var(--color-text-secondary); }
 .sales-search input { all: unset; flex: 1; font-size: 13px; color: var(--color-text-primary); }
 .sales-search input::placeholder { color: var(--color-text-secondary); opacity: 0.6; }
-.sales-table-wrap { overflow-x: auto; }
+.sales-table-wrap { overflow: visible; }
+.sales-table-wrap--virtual { overflow-x: auto; }
+.sales-table--virtual { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.sales-table--virtual thead { position: sticky; top: 0; z-index: 2; background: var(--color-surface-container-low); }
+.sales-table--virtual tbody { min-width: 100%; }
+.sales-table--virtual th, .sales-table--virtual td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--color-surface-border);
+  box-sizing: border-box;
+}
+.sales-table--virtual tr {
+  border-bottom: 1px solid var(--color-surface-border);
+  background: var(--color-surface);
+}
+.sales-table--virtual tbody tr:hover td { background: var(--color-surface-container-low); }
 .sales-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.sales-table th { padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-surface-border); background: var(--color-surface-container-low); }
-.sales-table td { padding: 10px 16px; border-bottom: 1px solid var(--color-surface-container); vertical-align: middle; }
+.sales-table th { padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-surface-border); background: var(--color-surface-container-low); position: sticky; top: 0; z-index: 2; }
+.sales-table td { padding: 10px 16px; border-bottom: 1px solid var(--color-surface-border); vertical-align: middle; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.35; }
 .sales-table tr:last-child td { border-bottom: 0; }
 .sales-table tr:hover td { background: var(--color-surface-container-low); }
 .sales-name { all: unset; display: flex; align-items: center; gap: 10px; cursor: pointer; }
@@ -1628,7 +1673,8 @@ select optgroup {
   position: relative;
   border: 1.5px dashed var(--color-primary-fixed-dim);
   border-radius: 16px;
-  padding: 28px 20px;
+  padding: 20px;
+  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
   align-items: center;

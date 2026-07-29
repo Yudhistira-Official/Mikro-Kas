@@ -5,6 +5,7 @@ import RupiahInput from "../components/RupiahInput";
 import DateField from "../components/DateField";
 import SearchSelect from "../components/SearchSelect";
 import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
 export default function SalesKomisi() {
   const { addToast } = useToast();
@@ -38,7 +39,7 @@ export default function SalesKomisi() {
       setSales(salesData || []);
       setKomisi(komisiData || []);
     } catch (error) {
-      addToast(String(error), "error");
+      { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }
@@ -82,7 +83,7 @@ export default function SalesKomisi() {
       setReportRows(rows || []);
       setReportSummary(summary || { total_tunai: 0, total_non_tunai: 0, total_omzet: 0 });
     } catch (error) {
-      addToast(String(error), "error");
+      { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setReportLoading(false);
     }
@@ -139,7 +140,7 @@ export default function SalesKomisi() {
         });
       }
       await load();
-    } catch (error) { addToast(String(error), "error"); } 
+    } catch (error) { { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const remove = async (id) => {
@@ -163,7 +164,7 @@ export default function SalesKomisi() {
         },
       });
       load();
-    } catch (error) { addToast(String(error), "error"); }
+    } catch (error) { { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const payCommission = async (item) => {
@@ -174,12 +175,20 @@ export default function SalesKomisi() {
       setPayment((prev) => ({ ...prev, [item.id]: "" }));
       addToast("Pembayaran komisi dicatat", "success");
       load();
-    } catch (error) { addToast(String(error), "error"); }
+    } catch (error) { { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const selectedCommissions = selectedSales ? komisi.filter((item) => item.sales_id === selectedSales.id) : [];
   const totalPending = komisi.reduce((sum, item) => sum + Number(item.sisa || 0), 0);
   const totalPaid = komisi.reduce((sum, item) => sum + Number(item.sudah_dibayar || 0), 0);
+
+  const salesColumns = [
+    { key: "nama", label: "Sales", render: (item) => <button className="sales-name" onClick={() => setSelectedSales(item)}><span className="sales-avatar">{item.nama.charAt(0).toUpperCase()}</span><span><strong>{item.nama}</strong><small>{item.email || "Tanpa email"}</small></span></button> },
+    { key: "kode", label: "Kode", render: (item) => item.kode || "-" },
+    { key: "telepon", label: "Kontak", render: (item) => item.telepon || "-" },
+    { key: "komisi", label: "Komisi Terutang", render: (item) => { const due = komisi.filter((row) => row.sales_id === item.id).reduce((sum, row) => sum + Number(row.sisa || 0), 0); return <span className={due ? "sales-amount sales-amount--warning" : "sales-amount"}>{rupiah(due)}</span>; } },
+    { key: "aksi", label: "Aksi", render: (item) => <div className="sales-row-actions"><button className="btn-icon" onClick={() => openForm(item)} title="Edit"><span className="material-symbols-outlined">edit</span></button><button className="btn-icon" onClick={() => remove(item.id)} title="Nonaktifkan"><span className="material-symbols-outlined">delete</span></button></div> },
+  ];
 
   return (
     <PageShell
@@ -203,9 +212,7 @@ export default function SalesKomisi() {
 
       {activeTab === "data" && <section className="sales-panel">
         <div className="sales-panel__toolbar"><div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari nama, kode, telepon, atau email..." /></div><button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button></div>
-        {loading ? <div className="loading-page"><div className="spinner" /></div> : filteredSales.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">groups</span><p>Belum ada data sales</p></div> : (
-          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Sales</th><th>Kode</th><th>Kontak</th><th>Komisi Terutang</th><th>Aksi</th></tr></thead><tbody>{filteredSales.map((item) => { const due = komisi.filter((row) => row.sales_id === item.id).reduce((sum, row) => sum + Number(row.sisa || 0), 0); return <tr key={item.id}><td><button className="sales-name" onClick={() => setSelectedSales(item)}><span className="sales-avatar">{item.nama.charAt(0).toUpperCase()}</span><span><strong>{item.nama}</strong><small>{item.email || "Tanpa email"}</small></span></button></td><td>{item.kode || "-"}</td><td>{item.telepon || "-"}</td><td className={due ? "sales-amount sales-amount--warning" : "sales-amount"}>{rupiah(due)}</td><td><div className="sales-row-actions"><button className="btn-icon" onClick={() => openForm(item)} title="Edit"><span className="material-symbols-outlined">edit</span></button><button className="btn-icon" onClick={() => remove(item.id)} title="Nonaktifkan"><span className="material-symbols-outlined">delete</span></button></div></td></tr>; })}</tbody></table></div>
-        )}
+         <VirtualDataTable columns={salesColumns} rows={filteredSales} rowKey={(item) => item.id} loading={loading} emptyMessage="Belum ada data sales" />
       </section>}
 
       {/* Tab Daftar Penjualan: laporan transaksi per sales dengan filter tanggal, sales, dan shift. */}

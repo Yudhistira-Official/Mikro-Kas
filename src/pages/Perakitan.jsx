@@ -26,7 +26,7 @@ export default function Perakitan() {
       const data = await invoke("list_bom");
       setBomList(Array.isArray(data) ? data : []);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }
@@ -60,7 +60,7 @@ export default function Perakitan() {
       setShowForm(false);
       load();
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setSaving(false);
     }

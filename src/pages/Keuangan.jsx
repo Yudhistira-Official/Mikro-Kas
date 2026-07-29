@@ -100,7 +100,7 @@ export default function Keuangan() {
       setForm({ tipe: "pengeluaran", jumlah: "", kategori: "Lainnya", keterangan: "" });
       load();
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     } finally {
       setSubmitting(false);
     }
@@ -113,7 +113,7 @@ export default function Keuangan() {
       load();
       addToast("Terhapus", "success");
     } catch (err) {
-      addToast(`Gagal: ${err}`, "error");
+      { const _m=String(err); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal: ${_m}`,"error"); };
     }
   };
 

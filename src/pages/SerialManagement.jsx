@@ -25,7 +25,7 @@ export default function SerialManagement() {
   useEffect(() => {
     invoke("list_produk", { onlyActive: true })
       .then((data) => setProdukList(data || []))
-      .catch((e) => addToast(String(e), "error"));
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); });
   }, [addToast]);
 
   const selectedProduct = produkList.find((p) => String(p.id) === String(produkId));

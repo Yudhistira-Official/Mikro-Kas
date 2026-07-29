@@ -7,7 +7,7 @@
 //     Harga Awal/modal, Total harga toko.
 //   - Ringkasan bawah memakai lebar tabel yang sama agar rapi di A4.
 // ============================================================
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import DateField from "../components/DateField";
@@ -76,6 +76,31 @@ export default function Laporan() {
   const [barisPengeluaran, setBarisPengeluaran] = useState([]);
   const [loadingPengeluaran, setLoadingPengeluaran] = useState(false);
   const [totalRetur, setTotalRetur] = useState(0);
+  const [sortLaporan, setSortLaporan] = useState({ by: null, order: "asc" });
+
+  // Sort helper: client-side sort berdasarkan field name dan direction
+  const sortData = (data, field, order) => {
+    if (!field || !data) return data;
+    return [...data].sort((a, b) => {
+      const va = a[field] ?? "";
+      const vb = b[field] ?? "";
+      const cmp = typeof va === "number" ? va - vb : String(va).toLowerCase().localeCompare(String(vb).toLowerCase());
+      return order === "desc" ? -cmp : cmp;
+    });
+  };
+
+  // Handler klik header kolom sortable
+  const handleSortLaporan = (tabKey, field) => {
+    setSortLaporan((prev) => {
+      if (prev.tab === tabKey && prev.by === field) {
+        return { tab: tabKey, by: field, order: prev.order === "asc" ? "desc" : "asc" };
+      }
+      return { tab: tabKey, by: field, order: "asc" };
+    });
+  };
+
+  // Reset sort saat ganti tab
+  useEffect(() => { setSortLaporan({ by: null, order: "asc" }); }, [tab]);
 
   useEffect(() => { invoke("get_toko").then(setToko).catch(console.error); }, []);
 
@@ -151,6 +176,26 @@ export default function Laporan() {
   const totalQtyPembelian = barisPembelian.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const totalPembelian = barisPembelian.reduce((sum, row) => sum + Number(row.subtotal || 0), 0);
   const totalPengeluaran = barisPengeluaran.reduce((sum, row) => sum + Number(row.jumlah || 0), 0);
+
+  // Data terurut per tab — sorted client-side
+  const sortedPenjualan = useMemo(() => sortData(barisProduk, sortLaporan.tab === "penjualan" ? sortLaporan.by : null, sortLaporan.order), [barisProduk, sortLaporan]);
+  const sortedInventori = useMemo(() => sortData(barisInv, sortLaporan.tab === "inventori" ? sortLaporan.by : null, sortLaporan.order), [barisInv, sortLaporan]);
+  const sortedPelanggan = useMemo(() => sortData(pelangganAktif, sortLaporan.tab === "pelanggan" ? sortLaporan.by : null, sortLaporan.order), [pelangganAktif, sortLaporan]);
+  const sortedPembelian = useMemo(() => sortData(barisPembelian, sortLaporan.tab === "pembelian" ? sortLaporan.by : null, sortLaporan.order), [barisPembelian, sortLaporan]);
+  const sortedPengeluaran = useMemo(() => sortData(barisPengeluaran, sortLaporan.tab === "pengeluaran" ? sortLaporan.by : null, sortLaporan.order), [barisPengeluaran, sortLaporan]);
+  const sortedMargin = useMemo(() => {
+    if (sortLaporan.tab !== "margin" || !sortLaporan.by) return barisProduk;
+    const field = sortLaporan.by;
+    // laba & margin adalah computed field — fallback ke total_harga atau total_modal
+    return sortData(barisProduk, field, sortLaporan.order);
+  }, [barisProduk, sortLaporan]);
+
+  // Render sort indicator (arrow) untuk header kolom
+  const sortIcon = (field) => {
+    if (sortLaporan.by !== field) return null;
+    const icon = sortLaporan.order === "desc" ? "expand_less" : "expand_more";
+    return <span className="material-symbols-outlined" style={{ fontSize: 14, verticalAlign: "middle", marginLeft: 4 }}>{icon}</span>;
+  };
 
   const exportCsv = () => {
     if (!barisProduk.length) return addToast("Tidak ada data untuk diekspor", "error");
@@ -495,12 +540,18 @@ export default function Laporan() {
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Rincian Penjualan {dari} s.d. {sampai}</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "720px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Nama Produk</th><th style={{ padding: "10px", textAlign: "right" }}>Jumlah</th><th style={{ padding: "10px" }}>Metode Pembayaran</th><th style={{ padding: "10px", textAlign: "right" }}>Harga Awal</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Total</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "produk_nama")}>Nama Produk{sortIcon("produk_nama")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "total_qty")}>Jumlah{sortIcon("total_qty")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "metode_bayar")}>Metode Pembayaran{sortIcon("metode_bayar")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "total_modal")}>Harga Awal{sortIcon("total_modal")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("penjualan", "total_harga")}>Total{sortIcon("total_harga")}</th>
+              </tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center" }}>Memuat data...</td></tr> : barisProduk.length === 0 ? (
                   <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Tidak ada data penjualan untuk periode ini.</td></tr>
                 ) : (<>
-                  {barisProduk.map((row, i) => <tr key={i} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_qty} terjual</td><td style={{ padding: "10px" }}>{labelPembayaran(row.metode_bayar)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_modal)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>{rupiah(row.total_harga)}</td></tr>)}
+                  {sortedPenjualan.map((row, i) => <tr key={i} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_qty} terjual</td><td style={{ padding: "10px" }}>{labelPembayaran(row.metode_bayar)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_modal)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>{rupiah(row.total_harga)}</td></tr>)}
                   <tr style={{ background: "#dcfce7", color: "#166534", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total Penjualan</td><td style={{ padding: "10px", textAlign: "right" }}>{totalQty} terjual</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalModal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalHarga)}</td></tr>
                 </>)}
               </tbody>
@@ -524,11 +575,17 @@ export default function Laporan() {
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Laporan Inventori & Nilai Stok</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "760px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Produk</th><th style={{ padding: "10px", textAlign: "right" }}>Stok</th><th style={{ padding: "10px", textAlign: "right" }}>Nilai Modal</th><th style={{ padding: "10px", textAlign: "right" }}>Nilai Jual</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Margin</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("inventori", "nama")}>Produk{sortIcon("nama")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("inventori", "stok")}>Stok{sortIcon("stok")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("inventori", "nilai_modal")}>Nilai Modal{sortIcon("nilai_modal")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("inventori", "nilai_jual")}>Nilai Jual{sortIcon("nilai_jual")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("inventori", "margin")}>Margin{sortIcon("margin")}</th>
+              </tr></thead>
               <tbody>
                 {loadingInv ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center" }}>Memuat inventori...</td></tr> : barisInv.length === 0 ? (
                   <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada data produk aktif.</td></tr>
-                ) : barisInv.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.nama}{row.sku ? <span className="text-label-md" style={{ marginLeft: "6px", color: "var(--color-text-secondary)" }}>#{row.sku}</span> : null}{row.stok <= row.stok_minimum ? <span className="badge badge-warning" style={{ marginLeft: "6px" }}>LOW STOCK</span> : null}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.stok} {row.satuan}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_modal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_jual)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-income-green)" }}>{rupiah(row.margin)}</td></tr>) }
+                ) : sortedInventori.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.nama}{row.sku ? <span className="text-label-md" style={{ marginLeft: "6px", color: "var(--color-text-secondary)" }}>#{row.sku}</span> : null}{row.stok <= row.stok_minimum ? <span className="badge badge-warning" style={{ marginLeft: "6px" }}>LOW STOCK</span> : null}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.stok} {row.satuan}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_modal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.nilai_jual)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-income-green)" }}>{rupiah(row.margin)}</td></tr>) }
               </tbody>
             </table>
           </div>
@@ -543,11 +600,17 @@ export default function Laporan() {
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Leaderboard Loyalitas</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "760px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Nama</th><th style={{ padding: "10px" }}>Telepon</th><th style={{ padding: "10px", textAlign: "right" }}>Transaksi</th><th style={{ padding: "10px", textAlign: "right" }}>Total Belanja</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Poin</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pelanggan", "customer_nama")}>Nama{sortIcon("customer_nama")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pelanggan", "customer_telepon")}>Telepon{sortIcon("customer_telepon")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pelanggan", "total_transaksi")}>Transaksi{sortIcon("total_transaksi")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pelanggan", "total_belanja")}>Total Belanja{sortIcon("total_belanja")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("pelanggan", "poin_loyalty")}>Poin{sortIcon("poin_loyalty")}</th>
+              </tr></thead>
               <tbody>
                 {loadingPelanggan ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center" }}>Memuat pelanggan...</td></tr> : pelangganAktif.length === 0 ? (
                   <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada data pelanggan aktif.</td></tr>
-                ) : pelangganAktif.map((row, i) => <tr key={row.customer_id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.customer_nama}</td><td style={{ padding: "10px" }}>{row.customer_telepon || "—"}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_transaksi}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_belanja)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-warning-amber)" }}>{Number(row.poin_loyalty || 0).toLocaleString("id-ID")}</td></tr>) }
+                ) : sortedPelanggan.map((row, i) => <tr key={row.customer_id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.customer_nama}</td><td style={{ padding: "10px" }}>{row.customer_telepon || "—"}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_transaksi}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_belanja)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-warning-amber)" }}>{Number(row.poin_loyalty || 0).toLocaleString("id-ID")}</td></tr>) }
               </tbody>
             </table>
           </div>
@@ -567,12 +630,19 @@ export default function Laporan() {
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Laporan Pembelian Supplier</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "860px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Tanggal</th><th style={{ padding: "10px" }}>Supplier</th><th style={{ padding: "10px" }}>Produk</th><th style={{ padding: "10px", textAlign: "right" }}>Jumlah</th><th style={{ padding: "10px", textAlign: "right" }}>Harga</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Subtotal</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pembelian", "tanggal")}>Tanggal{sortIcon("tanggal")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pembelian", "supplier_nama")}>Supplier{sortIcon("supplier_nama")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pembelian", "produk_nama")}>Produk{sortIcon("produk_nama")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pembelian", "qty")}>Jumlah{sortIcon("qty")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pembelian", "harga_satuan")}>Harga{sortIcon("harga_satuan")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("pembelian", "subtotal")}>Subtotal{sortIcon("subtotal")}</th>
+              </tr></thead>
               <tbody>
                 {loadingPembelian ? <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center" }}>Memuat pembelian...</td></tr> : barisPembelian.length === 0 ? (
                   <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada pembelian pada periode ini.</td></tr>
                 ) : (<>
-                  {barisPembelian.map((row, i) => <tr key={`${row.transaksi_id}-${i}`} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.supplier_nama || "—"}</td><td style={{ padding: "10px" }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.qty}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.harga_satuan)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700 }}>{rupiah(row.subtotal)}</td></tr>)}
+                  {sortedPembelian.map((row, i) => <tr key={`${row.transaksi_id}-${i}`} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.supplier_nama || "—"}</td><td style={{ padding: "10px" }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.qty}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.harga_satuan)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700 }}>{rupiah(row.subtotal)}</td></tr>)}
                   <tr style={{ background: "#fef3c7", color: "#92400e", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{totalQtyPembelian}</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalPembelian)}</td></tr>
                 </>)}
               </tbody>
@@ -596,12 +666,17 @@ export default function Laporan() {
           <p className="text-headline-sm" style={{ marginBottom: "0.75rem" }}>Laporan Detail Pengeluaran</p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "760px" }}>
-              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}><th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Tanggal</th><th style={{ padding: "10px" }}>Kategori</th><th style={{ padding: "10px" }}>Keterangan</th><th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Jumlah</th></tr></thead>
+              <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pengeluaran", "tanggal")}>Tanggal{sortIcon("tanggal")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pengeluaran", "kategori")}>Kategori{sortIcon("kategori")}</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("pengeluaran", "keterangan")}>Keterangan{sortIcon("keterangan")}</th>
+                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("pengeluaran", "jumlah")}>Jumlah{sortIcon("jumlah")}</th>
+              </tr></thead>
               <tbody>
                 {loadingPengeluaran ? <tr><td colSpan={4} style={{ padding: "20px", textAlign: "center" }}>Memuat pengeluaran...</td></tr> : barisPengeluaran.length === 0 ? (
                   <tr><td colSpan={4} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Belum ada pengeluaran pada periode ini.</td></tr>
                 ) : (<>
-                  {barisPengeluaran.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.kategori}</td><td style={{ padding: "10px" }}>{row.keterangan || "—"}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(row.jumlah)}</td></tr>)}
+                  {sortedPengeluaran.map((row, i) => <tr key={row.id} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px" }}>{formatDateId(row.tanggal)}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.kategori}</td><td style={{ padding: "10px" }}>{row.keterangan || "—"}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--color-expense-red)" }}>{rupiah(row.jumlah)}</td></tr>)}
                   <tr style={{ background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalPengeluaran)}</td></tr>
                 </>)}
               </tbody>
@@ -631,19 +706,19 @@ export default function Laporan() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "760px" }}>
               <thead>
                 <tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
-                  <th style={{ padding: "10px", borderRadius: "8px 0 0 0" }}>Nama Produk</th>
-                  <th style={{ padding: "10px", textAlign: "right" }}>Terjual</th>
-                  <th style={{ padding: "10px", textAlign: "right" }}>Total Modal</th>
-                  <th style={{ padding: "10px", textAlign: "right" }}>Total Omset</th>
-                  <th style={{ padding: "10px", textAlign: "right" }}>Laba Kotor</th>
-                  <th style={{ padding: "10px", textAlign: "right", borderRadius: "0 8px 0 0" }}>Margin</th>
+                  <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("margin", "produk_nama")}>Nama Produk{sortIcon("produk_nama")}</th>
+                  <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("margin", "total_qty")}>Terjual{sortIcon("total_qty")}</th>
+                  <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("margin", "total_modal")}>Total Modal{sortIcon("total_modal")}</th>
+                  <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("margin", "total_harga")}>Total Omset{sortIcon("total_harga")}</th>
+                  <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("margin", "total_harga")}>Laba Kotor{sortIcon("total_harga")}</th>
+                  <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("margin", "total_harga")}>Margin{sortIcon("total_harga")}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center" }}>Memuat data...</td></tr> : barisProduk.length === 0 ? (
                   <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Tidak ada data penjualan untuk periode ini.</td></tr>
                 ) : (<>
-                  {barisProduk.map((row, i) => {
+                  {sortedMargin.map((row, i) => {
                     const laba = row.total_harga - row.total_modal;
                     const persen = row.total_harga > 0 ? ((laba / row.total_harga) * 100).toFixed(1) + "%" : "0%";
                     return (

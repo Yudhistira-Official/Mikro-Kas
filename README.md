@@ -24,12 +24,12 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 ### Dashboard
 
 - Ringkasan penjualan kotor, retur, penjualan bersih, laba kotor, keuntungan bersih, margin, transaksi, dan pengeluaran.
-- Produk terlaris, stok rendah, tren penjualan, dan transaksi terbaru.
-- Filter periode laporan.
+- Produk terlaris, produk kurang laris, semua produk, tren penjualan, dan transaksi terbaru.
+- Filter periode laporan dan sortir kolom berdasarkan header.
 
 ### Master Data
 
-- **Daftar Item / Barang**: CRUD produk, SKU, barcode, kategori, supplier, foto, harga jual, harga diskon, stok minimum, satuan multi, dan import CSV.
+- **Daftar Item / Barang**: CRUD produk, multi-SKU per produk (barcode warna/varian berbeda), barcode scan, kategori, supplier, foto, harga jual, harga diskon, stok minimum, satuan multi, dan import/export Excel.
 - **Daftar Supplier**: CRUD supplier, kontak WhatsApp, detail supplier, salin link WhatsApp, dan catatan harga supplier per produk.
 - **Daftar Pelanggan**: CRUD pelanggan, limit kredit, kontak WhatsApp, detail pelanggan, salin link WhatsApp, dan import CSV.
 - **Daftar Sales**: CRUD sales, kode, telepon, email, komisi terutang, histori periode, dan pembayaran komisi.
@@ -40,10 +40,12 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 
 ### Kasir dan Penjualan
 
-- Kasir/POS dengan pencarian produk, tampilan kartu/list, cart, perubahan qty, multi-satuan, customer, diskon, pajak, service charge, ongkir, dan total bayar.
+- Kasir/POS dengan pencarian produk substring (ranked: exact > awalan > mengandung), tampilan kartu/list, cart, perubahan qty, multi-satuan, customer, diskon, pajak, service charge, ongkir, dan total bayar.
+- Multi-SKU: scan barcode alternatif tetap menambah produk yang sama ke cart.
 - Metode pembayaran Tunai, QRIS, dan Transfer.
 - Validasi uang diterima, kembalian, fokus keyboard `End`, dan submit dengan `Enter`.
-- Konfirmasi cetak faktur setelah transaksi tersimpan.
+- Konfirmasi cetak faktur: `Ya, Cetak` atau `Tidak` (simpan tanpa cetak). Jika cetak gagal, transaksi dibatalkan otomatis.
+- Keyboard shortcut: Arrow L/R pilih, Enter jalankan, Escape batal.
 - Toast sukses dengan aksi **Urungkan** dan shortcut `Ctrl+Z`.
 - Reorder transaksi dari riwayat.
 - Pesanan penjualan, retur, tukar tambah, dan pengiriman.
@@ -52,7 +54,7 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 ### Pembelian dan Stok
 
 - Pembelian/restock supplier, DP, riwayat pembelian, dan catatan harga supplier.
-- Stock opname dengan audit penyesuaian.
+- Stock opname dengan VirtualDataTable (dinamis), audit penyesuaian, dan export DOCX.
 - Riwayat stok.
 - Serial number: tambah, status, transaksi terkait, dan hapus.
 - HPP FIFO/LIFO: tambah batch stok dan kalkulasi harga pokok.
@@ -73,16 +75,19 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 - QRIS dinamis dari QRIS statis merchant.
 - Multi profil QRIS dan pemilihan profil aktif.
 - Status, konfirmasi manual, expiry, dan riwayat QRIS.
-- Cetak faktur/struk ESC/POS untuk printer thermal 58mm.
+- Cetak struk/struk ESC/POS: layout standar POS (32/80mm), dual-align (label kiri + nominal kanan), garis pemisah, wrap otomatis, UTF-8.
+- Lebar kertas otomatis deteksi 58mm (32 char) atau 80mm (48 char).
+- Test print menggunakan layout yang sama dengan struk transaksi.
 - Desktop mencoba device printer USB/COM umum lintas Windows dan Linux; driver printer tetap diperlukan.
 
 ### Pengaturan Toko
 
 - **Profil Perusahaan**: nama toko/perusahaan, alamat, telepon, email, website, NPWP, deskripsi usaha, dan QRIS statis.
 - **Profil QRIS Pembayaran**: profil QRIS statis multi-merchant untuk perangkat mobile.
-- User dan role, PIN kasir, reset password, dan status user.
+- User dan role (admin, kasir, supervisor, inventori), PIN kasir, reset password, dan status user.
 - Setting nomor transaksi dan generate nomor transaksi.
 - Pengaturan PPN: mode non/include/exclude, tarif, dan kalkulasi preview.
+- Hardware POS: printer path, lebar kertas (32/48), scanner HID, customer display.
 - Backup/restore database melalui native file picker.
 - Maintenance database SQLite.
 - Log sistem dengan viewer, refresh, copy, dan export.
@@ -92,6 +97,8 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 - Desktop memakai sidebar berdasarkan kelompok kerja: Utama, Master Data, Pembelian, Penjualan, Perakitan, Konsinyasi, Persediaan, Akuntansi, Laporan, dan Pengaturan.
 - Sidebar desktop memiliki pencarian fitur berdasarkan judul dan deskripsi tersembunyi.
 - Android memakai bottom navigation dan menu **Lainnya** berbentuk titik tiga.
+- Keyboard shortcut: F1-F10 untuk navigasi halaman, F11 untuk toggle fullscreen.
+- VirtualDataTable dengan ukuran baris dinamis (measureElement) agar tidak tumpang tindih.
 - Form penting menggunakan modal, label penjelas, preview hasil, empty state, loading state, validasi input, dan toast feedback.
 - Operasi CRUD utama menyediakan aksi **Urungkan** pada notifikasi bila backend mendukung reverse operation.
 - UI responsif dan mengikuti design token warna MikroKas: violet primary, cyan secondary, amber tertiary, surface putih bersih.
@@ -105,33 +112,11 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 - Input backend divalidasi dan query database menggunakan parameter.
 - Android backup otomatis dinonaktifkan melalui konfigurasi aplikasi.
 
-## Menjalankan Project
-
-### Frontend
+## Menjalankan
 
 ```bash
 npm install
-npm run dev
-```
-
-### Desktop Tauri
-
-```bash
 npm run tauri dev
-```
-
-### Build Frontend
-
-```bash
-npm run build
-```
-
-### Verifikasi Backend
-
-```bash
-cd src-tauri
-cargo check
-cargo test
 ```
 
 ## Struktur Project
@@ -142,10 +127,12 @@ MikroKas/
 │   └── logo-header.png
 ├── src/
 │   ├── components/
-│   │   ├── AdvancedCrudPage.jsx
+│   │   ├── VirtualDataTable.jsx
 │   │   ├── BarcodeScanner.jsx
 │   │   ├── DropZoneImport.jsx
 │   │   ├── PinGate.jsx
+│   │   ├── RupiahInput.jsx
+│   │   ├── PageKit.jsx
 │   │   └── desktop/Sidebar.jsx
 │   ├── hooks/useToast.jsx
 │   ├── layouts/
@@ -172,16 +159,35 @@ MikroKas/
 │   │   ├── Akuntansi.jsx
 │   │   ├── Deposit.jsx
 │   │   ├── Laporan.jsx
+│   │   ├── StockOpname.jsx
+│   │   ├── RiwayatStok.jsx
+│   │   ├── Riwayat.jsx
+│   │   ├── RiwayatPembelian.jsx
+│   │   ├── NomorTransaksi.jsx
+│   │   ├── PajakSetting.jsx
+│   │   ├── Sistem.jsx
 │   │   ├── TokoSetup.jsx
 │   │   ├── Profile.jsx
+│   │   ├── BackupRestore.jsx
 │   │   └── ...
 │   ├── styles/global.css
 │   ├── utils/ipc.js
+│   ├── utils/printerSettings.js
+│   ├── utils/windowMode.js
 │   └── App.jsx
 ├── src-tauri/
 │   ├── migrations/
+│   │   ├── 001_init.sql
+│   │   ├── 041_produk_sku.sql
+│   │   └── ...
 │   ├── src/commands/
+│   │   ├── produk_cmd.rs
+│   │   ├── transaksi_cmd.rs
+│   │   ├── printer_cmd.rs
+│   │   ├── hardware_cmd.rs
+│   │   └── ...
 │   ├── src/models/
+│   │   └── produk.rs
 │   ├── src/db.rs
 │   └── src/lib.rs
 ├── package.json

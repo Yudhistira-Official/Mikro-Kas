@@ -1,4 +1,5 @@
 //! Commands customer display — data untuk layar customer
+use crate::commands::user_cmd::{require_authenticated, AuthState};
 use crate::db::DbState;
 use rusqlite::params;
 use serde::Serialize;
@@ -21,8 +22,10 @@ pub struct CustomerDisplayItem {
 #[tauri::command]
 pub fn get_customer_display_data(
     state: State<DbState>,
+    auth: State<AuthState>,
     transaksi_id: i64,
 ) -> Result<CustomerDisplayData, String> {
+    require_authenticated(auth.inner())?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
 
     let total: i64 = conn

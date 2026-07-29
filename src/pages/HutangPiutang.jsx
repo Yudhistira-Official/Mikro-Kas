@@ -15,6 +15,7 @@ import {
   PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge,
   useSearchFilter, rupiah,
 } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
 /**
  * Hitung selisih hari jatuh tempo vs hari ini (null jika tanpa tanggal).
@@ -60,7 +61,7 @@ export default function HutangPiutang() {
       setCustomers(custData);
       setSuppliers(suppData);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }
@@ -292,7 +293,7 @@ export default function HutangPiutang() {
         emptyTitle={`Belum ada catatan ${tab === "hutang" ? "hutang" : "piutang"}`}
         emptyHint="Klik + Catatan untuk menambahkan."
       >
-        <DataTable columns={columns} rows={filtered} rowKey={(item) => item.id} />
+        <VirtualDataTable columns={columns} rows={filtered} rowKey={(item) => item.id} loading={loading} emptyMessage="Belum ada hutang/piutang" />
       </DataPanel>
 
       {showForm && (

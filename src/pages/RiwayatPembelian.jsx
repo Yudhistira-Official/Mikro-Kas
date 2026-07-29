@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, DataTable, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import DateField from "../components/DateField";
 import { formatDateTimeId } from "../utils/dateFormat";
 
@@ -19,19 +20,23 @@ export default function RiwayatPembelian() {
   const [sampai, setSampai] = useState(today);
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE_SIZE = 50;
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (offset = 0, append = false) => {
+    if (!append) setLoading(true);
     try {
       const data = await invoke("list_transaksi", {
         tipe: "pembelian",
         dariTanggal: dari,
         sampaiTanggal: sampai,
-        limit: 100,
+        limit: PAGE_SIZE,
+        offset,
       });
-      setList(data);
+      setList((prev) => append ? [...prev, ...data] : data);
+      setHasMore(data.length >= PAGE_SIZE);
     } catch (e) {
-      addToast(`Gagal memuat riwayat pembelian: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat riwayat pembelian: ${_m}`,"error"); };
     } finally {
       setLoading(false);
     }
@@ -133,7 +138,7 @@ export default function RiwayatPembelian() {
         emptyTitle="Belum ada pembelian"
         emptyHint="Ubah rentang tanggal atau lakukan restock di menu Pembelian."
       >
-        <DataTable columns={columns} rows={filtered} rowKey={(t) => t.id} />
+        <VirtualDataTable columns={columns} rows={filtered} rowKey={(t) => t.id} loading={loading} hasMore={hasMore} onEndReached={() => { if (!loading && hasMore) load(list.length, true); }} emptyMessage="Belum ada riwayat pembelian" />
       </DataPanel>
     </PageShell>
   );

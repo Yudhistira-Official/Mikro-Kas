@@ -5,6 +5,7 @@ import {
   PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge,
   useSearchFilter,
 } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
 export default function StockOpname() {
   const { addToast } = useToast();
@@ -280,7 +281,7 @@ export default function StockOpname() {
             emptyTitle="Tidak ada produk"
             emptyHint="Aktifkan produk terlebih dulu."
           >
-            <DataTable columns={columnsBaru} rows={filtered} rowKey={(p) => p.id} />
+            <VirtualDataTable columns={columnsBaru} rows={filtered} rowKey={(p) => p.id} loading={loading} emptyMessage="Tidak ada produk" />
           </DataPanel>
 
           <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -303,7 +304,7 @@ export default function StockOpname() {
           emptyTitle="Belum ada opname"
           emptyHint="Buat opname baru di tab Opname Baru."
         >
-          <DataTable columns={columnsRiwayat} rows={riwayat} rowKey={(r) => r.id} />
+          <VirtualDataTable columns={columnsRiwayat} rows={riwayat} loading={loading} emptyMessage="Belum ada opname" />
         </DataPanel>
       )}
 

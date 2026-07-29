@@ -8,6 +8,7 @@
 // Desktop: tauri-plugin-opener -> open_url(file://...)
 // ============================================================
 
+use crate::commands::user_cmd::{require_admin, AuthState};
 use crate::db::DbState;
 use base64::Engine;
 use tauri::{Manager, State};
@@ -77,7 +78,8 @@ pub fn simpan_pdf(
 
 /// Backup database SQLite ke file cache export. Return path agar user bisa share/salin.
 #[tauri::command]
-pub fn backup_database(app: tauri::AppHandle, _state: State<DbState>) -> Result<String, String> {
+pub fn backup_database(app: tauri::AppHandle, auth: State<AuthState>) -> Result<String, String> {
+    require_admin(&auth)?;
     let cache_dir = app
         .path()
         .app_cache_dir()
@@ -96,9 +98,10 @@ pub fn backup_database(app: tauri::AppHandle, _state: State<DbState>) -> Result<
 #[tauri::command]
 pub fn backup_database_to(
     app: tauri::AppHandle,
-    _state: State<DbState>,
+    auth: State<AuthState>,
     target_path: String,
 ) -> Result<String, String> {
+    require_admin(&auth)?;
     crate::logger::log(&format!(
         "BACKUP: backup_database_to dipanggil; target_len={}",
         target_path.len()
@@ -120,8 +123,9 @@ pub fn backup_database_to(
 #[tauri::command]
 pub fn export_database_base64(
     app: tauri::AppHandle,
-    _state: State<DbState>,
+    auth: State<AuthState>,
 ) -> Result<String, String> {
+    require_admin(&auth)?;
     crate::logger::log("BACKUP: export_database_base64 dipanggil");
     let db_path = database_path(&app)?;
     let bytes = std::fs::read(&db_path).map_err(|e| format!("Gagal baca DB untuk backup: {e}"))?;
@@ -137,9 +141,10 @@ pub fn export_database_base64(
 #[tauri::command]
 pub fn restore_database_base64(
     app: tauri::AppHandle,
-    _state: State<DbState>,
+    auth: State<AuthState>,
     db_base64: String,
 ) -> Result<(), String> {
+    require_admin(&auth)?;
     crate::logger::log(&format!(
         "BACKUP: restore_database_base64 dipanggil; base64_len={}",
         db_base64.len()
@@ -184,9 +189,10 @@ fn database_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 pub fn restore_database(
     app: tauri::AppHandle,
-    _state: State<DbState>,
+    auth: State<AuthState>,
     backup_path: String,
 ) -> Result<(), String> {
+    require_admin(&auth)?;
     let source = std::path::PathBuf::from(backup_path);
     if !source.exists() {
         return Err("File backup tidak ditemukan".into());

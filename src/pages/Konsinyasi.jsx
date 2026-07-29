@@ -38,7 +38,7 @@ export default function Konsinyasi() {
       setKeluar(Array.isArray(k) ? k : []);
       setSuppliers(Array.isArray(s) ? s : []);
       setProdukList(Array.isArray(p) ? p : []);
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
     finally { setLoading(false); }
   };
 

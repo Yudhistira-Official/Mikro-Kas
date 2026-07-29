@@ -73,7 +73,7 @@ export default function TukarTambah() {
       const rows = await invoke("list_tukar_tambah");
       setData(Array.isArray(rows) ? rows : []);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }
@@ -107,7 +107,7 @@ export default function TukarTambah() {
       setRiwayat(Array.isArray(trxList) ? trxList : []);
       setProdukList(Array.isArray(produk) ? produk : []);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     }
   };
 
@@ -299,7 +299,7 @@ export default function TukarTambah() {
       addToast("Tukar tambah multi-item dicatat", "success");
       load();
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     }
   };
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, DataTable, FormModal, StatusBadge, useSearchFilter } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import SearchSelect from "../components/SearchSelect";
 import PinGate from "../components/PinGate";
 
@@ -29,7 +30,7 @@ export default function Gudang() {
   const load = async () => {
     setLoading(true);
     try { setList(await invoke("list_gudang")); }
-    catch (error) { addToast(String(error), "error"); }
+    catch (error) { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -68,7 +69,7 @@ export default function Gudang() {
       }
       setShowForm(false);
       load();
-    } catch (error) { addToast(String(error), "error"); }
+    } catch (error) { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }
   };
 
   const [confirmNonaktif, setConfirmNonaktif] = useState(null);
@@ -86,7 +87,7 @@ export default function Gudang() {
         },
       });
       load();
-    } catch (error) { addToast(String(error), "error"); }
+    } catch (error) { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }
   };
 
   const columns = [
@@ -150,7 +151,7 @@ export default function Gudang() {
         emptyTitle="Belum ada gudang"
         emptyHint="Klik Tambah Gudang untuk menambah lokasi stok."
       >
-        <DataTable columns={columns} rows={filtered} rowKey={(g) => g.id} />
+        <VirtualDataTable columns={columns} rows={filtered} rowKey={(g) => g.id} loading={loading} emptyMessage="Belum ada gudang" />
       </DataPanel>
 
       {showForm && (
@@ -209,7 +210,7 @@ export default function Gudang() {
             addToast("Gudang dihapus permanen", "info");
             setShowForm(false);
             load();
-          } catch (e) { addToast(String(e), "error"); }
+          } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
         }} />
       )}
 

@@ -27,7 +27,7 @@ export default function MultiHarga() {
       const data = await invoke("hitung_diskon_bertingkat", { harga: Number(diskonForm.harga), lapisan });
       setResult(data);
       setResultType("diskon");
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const getHarga = async () => {
@@ -36,7 +36,7 @@ export default function MultiHarga() {
       const data = await invoke("get_harga_jual", { produkId: Number(hargaForm.produkId) });
       setResult(data);
       setResultType("harga");
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   return (

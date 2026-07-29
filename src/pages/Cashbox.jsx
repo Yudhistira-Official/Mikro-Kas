@@ -76,7 +76,7 @@ export default function Cashbox() {
         setClosingQty({});
       }
     } catch (error) {
-      addToast(`Gagal memuat lembar kas: ${error}`, "error");
+      { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat lembar kas: ${_m}`,"error"); };
     } finally {
       setLoading(false);
     }
@@ -105,7 +105,7 @@ export default function Cashbox() {
   const createBox = async (event) => {
     event.preventDefault();
     if (!boxNama.trim()) return addToast("Nama kas wajib diisi", "error");
-    try { await invoke("create_cashbox", { nama: boxNama.trim() }); setBoxNama(""); setShowCreate(false); await load(); addToast("Cashbox baru dibuat", "success"); } catch (error) { addToast(String(error), "error"); }
+    try { await invoke("create_cashbox", { nama: boxNama.trim() }); setBoxNama(""); setShowCreate(false); await load(); addToast("Cashbox baru dibuat", "success"); } catch (error) { { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const handleMutasi = async (event) => {
@@ -120,7 +120,7 @@ export default function Cashbox() {
       await load();
       setSelectedBox((current) => (cashboxes.find((box) => box.id === current?.id) || current));
       addToast("Mutasi kas berhasil", "success");
-    } catch (error) { addToast(String(error), "error"); }
+    } catch (error) { { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const filteredCashboxes = cashboxes.filter((box) => box.nama.toLowerCase().includes(query.trim().toLowerCase()));
@@ -164,7 +164,7 @@ export default function Cashbox() {
       addToast("Shift berhasil ditutup", "success");
       await load(String(selectedShift.id));
     } catch (error) {
-      addToast(`Gagal menyimpan hitungan kas: ${error}`, "error");
+      { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal menyimpan hitungan kas: ${_m}`,"error"); };
     } finally {
       setSaving(false);
     }

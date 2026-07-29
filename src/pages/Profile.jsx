@@ -26,7 +26,7 @@ export default function Profile() {
         qris_statis: toko?.qris_statis || "",
         qris_foto_path: toko?.qris_foto_path || "",
       }))
-      .catch((error) => addToast(String(error), "error"))
+      .catch((error) => { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
       .finally(() => setLoading(false));
   }, [addToast]);
 

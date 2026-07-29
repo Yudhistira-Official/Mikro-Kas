@@ -1,7 +1,7 @@
 // ============================================================
 // Pembelian.jsx — Restock per produk via popup (PageKit)
 // ============================================================
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import DateField from "../components/DateField";
@@ -10,11 +10,11 @@ import RupiahInput from "../components/RupiahInput";
 import {
   PageShell,
   DataPanel,
-  DataTable,
   FormModal,
   InfoNote,
   rupiah,
 } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
 /**
  * Restock per produk: klik produk → popup qty, harga beli, supplier → simpan.
@@ -22,6 +22,8 @@ import {
 export default function Pembelian() {
   const { addToast } = useToast();
   const [produk, setProduk] = useState([]);
+  const [produkHasMore, setProdukHasMore] = useState(true);
+  const [produkLoading, setProdukLoading] = useState(false);
   const [supplier, setSupplier] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -42,19 +44,25 @@ export default function Pembelian() {
     try { invoke("write_log", { msg: `RESTOCK: ${msg}` }).catch(() => {}); } catch {}
   };
 
-  const load = async () => {
-    setLoading(true);
+  const produkRequestRef = useRef(0);
+  const load = async (append = false) => {
+    const requestId = ++produkRequestRef.current;
+    if (!append) setLoading(true);
+    else setProdukLoading(true);
     try {
       const [dataProduk, dataSupplier] = await Promise.all([
-        invoke("list_produk", { onlyActive: true }),
-        invoke("list_supplier"),
+        invoke("list_produk", { onlyActive: true, limit: 50, offset: append ? produk.length : 0 }),
+        append ? Promise.resolve(null) : invoke("list_supplier"),
       ]);
-      setProduk(dataProduk);
-      setSupplier(dataSupplier);
+      if (requestId !== produkRequestRef.current) return;
+      setProduk((current) => append ? [...current, ...dataProduk] : dataProduk);
+      setProdukHasMore(dataProduk.length === 50);
+      if (dataSupplier) setSupplier(dataSupplier);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
+      setProdukLoading(false);
     }
   };
 
@@ -187,7 +195,15 @@ export default function Pembelian() {
         emptyHint="Ubah kata kunci atau tambah produk di menu Katalog."
       >
         {view === "list" ? (
-          <DataTable columns={columns} rows={shown} rowKey={(p) => p.id} />
+          <VirtualDataTable
+            columns={columns}
+            rows={shown}
+            rowKey={(p) => p.id}
+            loading={loading || produkLoading}
+            hasMore={produkHasMore}
+            onEndReached={() => { if (!loading && !produkLoading && produkHasMore) load(true); }}
+            emptyMessage="Produk tidak ditemukan"
+          />
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12, padding: 16 }}>
             {shown.map((p) => (
@@ -196,13 +212,24 @@ export default function Pembelian() {
                 type="button"
                 className="card"
                 onClick={() => openRestock(p)}
-                style={{ textAlign: "left", padding: 14, cursor: "pointer", border: 0 }}
+                style={{
+                  textAlign: "left",
+                  padding: 14,
+                  cursor: "pointer",
+                  border: "1px solid var(--color-surface-border)",
+                  borderRadius: 12,
+                  minHeight: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
               >
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{p.nama}</div>
-                <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{p.sku || "—"}</div>
-                <div style={{ marginTop: 8, fontWeight: 700, color: "var(--color-primary)" }}>{rupiah(p.harga_beli)}</div>
-                <div className="text-label-md" style={{ marginTop: 4 }}>Stok {p.stok} {p.satuan || ""}</div>
-                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: "var(--color-primary)" }}>Restock →</div>
+                <div style={{ fontWeight: 600, fontSize: 14, overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35 }}>{p.nama}</div>
+                <div className="text-label-md" style={{ color: "var(--color-text-secondary)", overflowWrap: "anywhere" }}>{p.sku || "—"}</div>
+                <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{rupiah(p.harga_beli)}</div>
+                <div className="text-label-md">Stok {p.stok} {p.satuan || ""}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-primary)" }}>Restock →</div>
               </button>
             ))}
           </div>

@@ -46,7 +46,7 @@ export default function Retur() {
         setList(sales);
         setRiwayat(returns);
       })
-      .catch((e) => addToast(String(e), "error"))
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
       .finally(() => setLoading(false));
   }, [addToast]);
 
@@ -65,7 +65,7 @@ export default function Retur() {
         produk_id: i.produk_id, qty: 0, max: i.qty, nama: i.produk_nama, harga: i.harga_satuan,
       })));
       setAlasan("");
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   /** Buka modal edit retur: gabung qty tersisa transaksi + qty retur saat ini. */
@@ -84,7 +84,7 @@ export default function Retur() {
         harga: i.harga_satuan,
       })));
       setAlasan(retur.header.alasan || "");
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const closeModal = () => {

@@ -92,9 +92,9 @@ function DropPositionFix({open,rootRef,popupRef}) {
       const spaceBelow=window.innerHeight-root.bottom-8;
       const spaceAbove=root.top-8;
       if(spaceBelow<ph&&spaceAbove>spaceBelow){
-        popup.style.position='fixed';popup.style.bottom=`${window.innerHeight-root.top+6}px`;popup.style.left=`${root.left}px`;popup.style.width=`${Math.min(root.width,300)}px`;popup.style.top='auto';
+        popup.style.width=`${Math.max(280, Math.min(root.width, 320))}px`;popup.style.bottom=`${window.innerHeight-root.top+6}px`;popup.style.left=`${Math.min(root.left, window.innerWidth-290)}px`;popup.style.top='auto';
       }else{
-        popup.style.position='fixed';popup.style.top=`${root.bottom+6}px`;popup.style.left=`${root.left}px`;popup.style.width=`${Math.min(root.width,300)}px`;popup.style.bottom='auto';
+        popup.style.position='fixed';popup.style.top=`${root.bottom+6}px`;popup.style.left=`${Math.min(root.left, window.innerWidth-290)}px`;popup.style.width=`${Math.max(280, Math.min(root.width, 320))}px`;popup.style.bottom='auto';
       }
     };
     fn();

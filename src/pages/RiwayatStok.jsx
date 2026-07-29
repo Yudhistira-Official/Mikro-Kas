@@ -8,8 +8,9 @@ import { Link } from "react-router-dom";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import {
-  PageShell, DataPanel, DataTable, InfoNote, StatusBadge, useSearchFilter,
+  PageShell, DataPanel, InfoNote, StatusBadge, useSearchFilter,
 } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import { formatDateTimeId } from "../utils/dateFormat";
 
 /**
@@ -29,7 +30,7 @@ export default function RiwayatStok() {
       const data = await invoke("list_stock_adjustments");
       setList(data);
     } catch (e) {
-      addToast(`Gagal memuat riwayat stok: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat riwayat stok: ${_m}`,"error"); };
     } finally {
       setLoading(false);
     }
@@ -199,10 +200,12 @@ export default function RiwayatStok() {
         emptyTitle={tab === "audit" ? "Belum ada riwayat penyesuaian stok" : "Belum ada riwayat reversal"}
         emptyHint={tab === "audit" ? "Lakukan stock opname atau sesuaikan stok dari halaman Produk." : "Kembalikan audit dari tab Audit untuk membuat jejak di sini."}
       >
-        <DataTable
+        <VirtualDataTable
           columns={tab === "audit" ? auditColumns : reversalColumns}
           rows={filtered}
           rowKey={(item) => item.id}
+          loading={loading}
+          emptyMessage={tab === "audit" ? "Belum ada riwayat penyesuaian stok" : "Belum ada riwayat reversal"}
         />
       </DataPanel>
     </PageShell>

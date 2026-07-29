@@ -44,3 +44,16 @@ npm-debug.log*
 
 # OpenCode agent state
 .opencode/
+
+# Graphify cache
+graphify-out/
+
+# Build artifacts
+src-tauri/target/
+dist/
+
+# User database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

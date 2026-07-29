@@ -17,7 +17,7 @@ export default function Akuntansi() {
   const [jurnalForm, setJurnalForm] = useState({ tanggal: new Date().toISOString().slice(0, 10), nomorJurnal: "", keterangan: "", debitAkunId: "", kreditAkunId: "", nominal: "" });
 
   const loadCoa = async () => {
-    try { setCoa(await invoke("list_coa")); } catch (e) { addToast(String(e), "error"); }
+    try { setCoa(await invoke("list_coa")); } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   useEffect(() => { loadCoa(); }, []);
@@ -45,7 +45,7 @@ export default function Akuntansi() {
       setShowCoaForm(false);
       setCoaForm({ kodeAkun: "", namaAkun: "", tipe: "aktiva", indukId: "", saldoNormal: "" });
       loadCoa();
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const handleCreateJurnal = async (event) => {
@@ -57,11 +57,11 @@ export default function Akuntansi() {
       addToast("Jurnal manual berhasil disimpan", "success");
       setShowJurnalForm(false);
       setResult(null);
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const handleReport = async (command) => {
-    try { setResult({ command, data: await invoke(command) }); } catch (e) { addToast(String(e), "error"); }
+    try { setResult({ command, data: await invoke(command) }); } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   return (

@@ -2,6 +2,7 @@
 //!
 //! Fungsi diagnostik untuk owner/admin menjaga kesehatan database.
 
+use crate::commands::user_cmd::{require_admin, AuthState};
 use crate::db::DbState;
 use tauri::State;
 
@@ -14,7 +15,8 @@ use tauri::State;
 /// - VACUUM (compact database file)
 /// - REINDEX (rebuild all indexes)
 #[tauri::command]
-pub fn maintenance_database(state: State<DbState>) -> Result<String, String> {
+pub fn maintenance_database(state: State<DbState>, auth: State<AuthState>) -> Result<String, String> {
+    require_admin(&auth)?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut hasil = Vec::new();
 

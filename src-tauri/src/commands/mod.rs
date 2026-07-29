@@ -15,6 +15,7 @@ pub mod deposit_cmd;
 /// File operations exposed to frontend: simpan & buka file PDF
 pub mod file_cmd;
 pub mod gudang_cmd;
+pub mod hardware_cmd;
 pub mod harga_supplier_cmd;
 /// Phase 4-5: HPP tracking per batch (FIFO/LIFO)
 pub mod hpp_cmd;
@@ -61,3 +62,4 @@ pub mod transaksi_cmd;
 /// Phase 4-5: Tukar tambah barang
 pub mod tukar_tambah_cmd;
 pub mod user_cmd;
+pub mod factory_reset_cmd;

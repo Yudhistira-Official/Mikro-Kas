@@ -70,6 +70,8 @@ pub fn init_db(app_dir: PathBuf) -> Result<Connection, String> {
     ensure_column(&conn, "toko", "website", "TEXT");
     ensure_column(&conn, "toko", "npwp", "TEXT");
     ensure_column(&conn, "toko", "deskripsi", "TEXT");
+    ensure_column(&conn, "toko", "fax", "TEXT");
+    ensure_column(&conn, "toko", "lebar_kertas", "INTEGER NOT NULL DEFAULT 48");
     ensure_column(&conn, "customer", "deskripsi_tambahan", "TEXT");
     ensure_column(&conn, "supplier", "deskripsi_tambahan", "TEXT");
     ensure_column(
@@ -89,16 +91,33 @@ pub fn init_db(app_dir: PathBuf) -> Result<Connection, String> {
     ensure_column(&conn, "transaksi", "pajak_nominal", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(&conn, "transaksi", "biaya_layanan", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(&conn, "transaksi", "ongkir", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "transaksi", "dibayar", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(&conn, "transaksi", "user_id", "INTEGER");
     ensure_column(
         &conn,
         "transaksi",
         "supplier_id",
         "INTEGER REFERENCES supplier(id) ON DELETE SET NULL",
     );
+    ensure_column(
+        &conn,
+        "transaksi",
+        "sales_id",
+        "INTEGER REFERENCES sales(id) ON DELETE SET NULL",
+    );
     ensure_column(&conn, "produk", "foto_path", "TEXT");
+    ensure_column(&conn, "produk", "kata_kunci", "TEXT");
     ensure_column(&conn, "produk", "satuan_multi", "TEXT");
     ensure_column(&conn, "produk", "harga_diskon", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(&conn, "produk", "diskon_berlaku_sampai", "TEXT");
+    ensure_column(&conn, "produk", "merek", "TEXT");
+    ensure_column(&conn, "produk", "tipe_item", "TEXT DEFAULT 'BARANG'");
+    ensure_column(&conn, "produk", "rak", "TEXT");
+    ensure_column(&conn, "produk", "kode_item", "TEXT");
+    ensure_column(&conn, "gudang", "kode", "TEXT");
+    ensure_column(&conn, "gudang", "jenis", "TEXT DEFAULT 'gudang'");
+    ensure_column(&conn, "gudang", "catatan", "TEXT");
+    ensure_column(&conn, "gudang", "created_at", "TEXT DEFAULT (datetime('now'))");
 
     match conn.execute_batch(include_str!("../migrations/006_hutang_piutang_jatuh_tempo.sql")) {
         Ok(_) => eprintln!("DB_INIT: Migrasi 006 sukses"),
@@ -189,11 +208,28 @@ pub fn init_db(app_dir: PathBuf) -> Result<Connection, String> {
     let _ = conn.execute_batch(include_str!("../migrations/032_stok_batch_hpp.sql"));
     ensure_column(&conn, "produk", "metode_hpp", "TEXT NOT NULL DEFAULT 'fifo'");
 
+    // Migrasi 033–040: reversal, gudang identitas, pesanan, bom, opname, cashbox, produk fields, gudang columns.
+    let _ = conn.execute_batch(include_str!("../migrations/033_stock_adjustment_reversal.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/034_gudang_departemen_identity.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/035_pesanan_nomor_hp.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/036_bom_header_lengkap.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/037_stock_opname.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/038_cashbox_pecahan.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/039_produk_fields_tambahan.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/040_gudang_columns.sql"));
+    let _ = conn.execute_batch(include_str!("../migrations/041_produk_sku.sql"));
+    // Backfill: SKU utama dari produk.sku ke tabel produk_sku (idempotent)
+    let _ = conn.execute_batch(
+        "INSERT OR IGNORE INTO produk_sku (produk_id, sku, is_primary)
+         SELECT id, sku, 1 FROM produk WHERE sku IS NOT NULL AND trim(sku) != '';",
+    );
+
+    crate::commands::hardware_cmd::ensure_hardware_table(&conn);
     eprintln!("DB_INIT: Success");
     Ok(conn)
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) {
+pub fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) {
     let pragma = format!("PRAGMA table_info({table})");
     let mut stmt = match conn.prepare(&pragma) {
         Ok(stmt) => stmt,

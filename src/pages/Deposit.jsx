@@ -19,11 +19,11 @@ export default function Deposit() {
   const [useForm, setUseForm] = useState({ customerId: "", nominal: "", keterangan: "" });
 
   const loadCustomers = async () => {
-    try { setCustomers(await invoke("list_customer")); } catch (e) { addToast(String(e), "error"); }
+    try { setCustomers(await invoke("list_customer")); } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const loadLogs = async (customerId) => {
-    try { setLogs(await invoke("list_deposit_log", { customerId })); } catch (e) { addToast(String(e), "error"); }
+    try { setLogs(await invoke("list_deposit_log", { customerId })); } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const loadAllDeposits = async () => {
@@ -36,7 +36,7 @@ export default function Deposit() {
         } catch { return null; }
       }));
       setDeposits(depositsData.filter(Boolean));
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   useEffect(() => { loadCustomers(); loadAllDeposits(); }, []);
@@ -54,7 +54,7 @@ export default function Deposit() {
       setTopUpForm({ customerId: "", nominal: "", keterangan: "" });
       loadAllDeposits();
       if (selectedCustomer) loadLogs(selectedCustomer.id);
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const handleUse = async (event) => {
@@ -66,7 +66,7 @@ export default function Deposit() {
       setUseForm({ customerId: "", nominal: "", keterangan: "" });
       loadAllDeposits();
       if (selectedCustomer) loadLogs(selectedCustomer.id);
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const openTopUp = (cust) => { setTopUpForm({ ...topUpForm, customerId: cust.id }); setShowTopUpModal(true); };

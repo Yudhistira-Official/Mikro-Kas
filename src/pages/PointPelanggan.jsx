@@ -19,7 +19,7 @@ export default function PointPelanggan() {
         masaBerlakuHari: data.masa_berlaku_hari || 365,
         minTukarPoint: data.min_tukar_point || 100,
       });
-    }).catch((e) => addToast(String(e), "error"));
+    }).catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); });
   }, []);
 
   const save = async () => {
@@ -32,7 +32,7 @@ export default function PointPelanggan() {
       addToast("Setting point disimpan", "success");
       const updated = await invoke("get_point_setting");
       setSetting(updated);
-    } catch (e) { addToast(String(e), "error"); }
+    } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
   };
 
   const contohBelanja = 100000;

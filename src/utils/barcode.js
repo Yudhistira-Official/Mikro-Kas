@@ -90,7 +90,9 @@ export function generateBarcodeSVG(text, width = 400, height = 100) {
     }
     x += unitWidth;
   }
+  // Escape XML special chars di text label — mencegah XSS via dangerouslySetInnerHTML
+  const safeText = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   // Text label
-  svgParts.push(`<text x="${width/2}" y="${height + fontSize + 4}" text-anchor="middle" font-family="monospace" font-size="${fontSize}" fill="black">${text}</text>`);
+  svgParts.push(`<text x="${width/2}" y="${height + fontSize + 4}" text-anchor="middle" font-family="monospace" font-size="${fontSize}" fill="black">${safeText}</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height + fontSize + 8}" viewBox="0 0 ${width} ${height + fontSize + 8}">${svgParts.join("")}</svg>`;
 }

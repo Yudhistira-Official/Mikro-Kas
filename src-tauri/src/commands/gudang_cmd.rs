@@ -68,9 +68,13 @@ fn next_gudang_sequence(tx: &Transaction<'_>) -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn list_gudang(state: State<DbState>) -> Result<Vec<Gudang>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, COALESCE(kode, ''), nama, alamat, COALESCE(jenis, 'gudang'), catatan, created_at, is_active, is_default FROM gudang ORDER BY is_default DESC, is_active DESC, kode ASC").map_err(|e| e.to_string())?;
+ pub fn list_gudang(state: State<DbState>) -> Result<Vec<Gudang>, String> {
+     let conn = state.0.lock().map_err(|e| e.to_string())?;
+     crate::db::ensure_column(&conn, "gudang", "kode", "TEXT");
+     crate::db::ensure_column(&conn, "gudang", "jenis", "TEXT DEFAULT 'gudang'");
+     crate::db::ensure_column(&conn, "gudang", "catatan", "TEXT");
+     crate::db::ensure_column(&conn, "gudang", "created_at", "TEXT DEFAULT (datetime('now'))");
+     let mut stmt = conn.prepare("SELECT id, COALESCE(kode, ''), nama, alamat, COALESCE(jenis, 'gudang'), catatan, created_at, is_active, is_default FROM gudang ORDER BY is_default DESC, is_active DESC, kode ASC").map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(Gudang {
@@ -276,6 +280,9 @@ pub fn transfer_stok(
     .map_err(|e| e.to_string())?;
     let transfer_id = tx.last_insert_rowid();
     for item in &items {
+        if !item.qty.is_finite() || item.qty <= 0.0 {
+            return Err(format!("Qty transfer produk {} harus bilangan positif", item.produk_id));
+        }
         let tersedia: f64 = tx
             .query_row(
                 "SELECT COALESCE(qty,0) FROM stok_gudang WHERE gudang_id=?1 AND produk_id=?2",

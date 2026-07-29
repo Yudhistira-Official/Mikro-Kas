@@ -10,14 +10,15 @@ import RupiahInput from "../components/RupiahInput";
 import {
   PageShell,
   DataPanel,
-  DataTable,
   FormModal,
   InfoNote,
   StatusBadge,
   useSearchFilter,
   rupiah,
 } from "../components/PageKit";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 
+const PAGE_SIZE = 50;
 const statusLabel = { open: "Open", selesai: "Selesai", batal: "Batal" };
 const statusTone = { open: "primary", selesai: "success", batal: "danger" };
 
@@ -29,6 +30,7 @@ export default function Pesanan() {
   const { addToast } = useToast();
   const [tab, setTab] = useState("open");
   const [rows, setRows] = useState([]);
+  const [hasMore, setHasMore] = useState(true);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -46,17 +48,18 @@ export default function Pesanan() {
   const [newCustNama, setNewCustNama] = useState("");
   const [newCustTelepon, setNewCustTelepon] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (offset = 0, append = false) => {
+    if (!append) setLoading(true);
     try {
       const [pesanan, customer] = await Promise.all([
-        invoke("list_pesanan_customer", { status: tab }),
-        invoke("list_customer"),
+        invoke("list_pesanan_customer", { status: tab, limit: PAGE_SIZE, offset }),
+        append ? Promise.resolve(null) : invoke("list_customer"),
       ]);
-      setRows(pesanan);
-      setCustomers(customer);
+      setRows((current) => append ? [...current, ...pesanan] : pesanan);
+      setHasMore(pesanan.length === PAGE_SIZE);
+      if (customer) setCustomers(customer);
     } catch (e) {
-      addToast(`Gagal memuat pesanan: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat pesanan: ${_m}`,"error"); };
     } finally {
       setLoading(false);
     }
@@ -123,7 +126,7 @@ export default function Pesanan() {
       setNewCustTelepon("");
       addToast("Customer ditambahkan", "success");
     } catch (e) {
-      addToast(`Gagal tambah customer: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal tambah customer: ${_m}`,"error"); };
     }
   };
 
@@ -153,7 +156,7 @@ export default function Pesanan() {
       setTab("open");
       await load();
     } catch (e) {
-      addToast(`Gagal simpan pesanan: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal simpan pesanan: ${_m}`,"error"); };
     } finally {
       setSubmitting(false);
     }
@@ -165,7 +168,7 @@ export default function Pesanan() {
       addToast(`Status → ${statusLabel[status] || status}`, "success");
       await load();
     } catch (e) {
-      addToast(`Gagal ubah status: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal ubah status: ${_m}`,"error"); };
     }
   };
 
@@ -176,7 +179,7 @@ export default function Pesanan() {
       addToast("Pesanan dihapus", "success");
       await load();
     } catch (e) {
-      addToast(`Gagal hapus: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal hapus: ${_m}`,"error"); };
     }
   };
 
@@ -317,7 +320,15 @@ export default function Pesanan() {
         emptyTitle="Belum ada pesanan"
         emptyHint="Tambah pesanan baru atau pilih tab status lain."
       >
-        <DataTable columns={columns} rows={filtered} rowKey={(row) => row.id} />
+        <VirtualDataTable
+          columns={columns}
+          rows={filtered}
+          rowKey={(row) => row.id}
+          loading={loading}
+          hasMore={hasMore}
+          onEndReached={() => { if (!loading && hasMore) load(rows.length, true); }}
+          emptyMessage="Belum ada pesanan"
+        />
       </DataPanel>
 
       {showForm && (

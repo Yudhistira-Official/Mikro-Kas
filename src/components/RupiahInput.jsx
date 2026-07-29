@@ -56,12 +56,15 @@ export default function RupiahInput({
     onChange?.(digits);
   };
 
+  const { textAlign, width, flex, minWidth, maxWidth, ...boxStyle } = style || {};
+  const alignRight = textAlign === "right";
   return (
-    <div style={{ position: "relative", ...style }}>
+    <div style={{ position: "relative", width: width || "100%", flex, minWidth, maxWidth, ...boxStyle }}>
       <span
         style={{
           position: "absolute",
-          left: 10,
+          left: alignRight ? undefined : 10,
+          right: alignRight ? 10 : undefined,
           top: "50%",
           transform: "translateY(-50%)",
           fontSize: 13,
@@ -83,7 +86,12 @@ export default function RupiahInput({
         disabled={disabled}
         inputMode="numeric"
         autoComplete="off"
-        style={{ paddingLeft: "38px" }}
+        style={{
+          width: "100%",
+          textAlign: alignRight ? "right" : undefined,
+          paddingLeft: alignRight ? 10 : 38,
+          paddingRight: alignRight ? 38 : undefined,
+        }}
       />
     </div>
   );

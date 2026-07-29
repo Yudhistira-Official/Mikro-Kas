@@ -1,7 +1,8 @@
 // ============================================================
 // Produk.jsx — CRUD produk, search, kategori, low-stock (PageKit)
 // ============================================================
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "../utils/ipc";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useToast } from "../hooks/useToast";
@@ -63,34 +64,95 @@ export default function Produk() {
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("produkView") || "card");
   // Barcode generator
   const [barcodeItem, setBarcodeItem] = useState(null);
+  const [sortBy, setSortBy] = useState("nama");
+  const [sortOrder, setSortOrder] = useState("asc");
+  const [produkHasMore, setProdukHasMore] = useState(true);
+  const [produkLoading, setProdukLoading] = useState(false);
+  const PAGE_SIZE = 50;
+  const scrollRef = useRef(null);
+  const produkRef = useRef(produk);
+  const produkRequestRef = useRef(0);
+  produkRef.current = produk;
   const toggleView = () => {
     const next = viewMode === "card" ? "list" : "card";
     setViewMode(next);
     localStorage.setItem("produkView", next);
   };
 
-  const loadProduk = useCallback(() => {
-    setLoading(true);
-    invoke("list_produk", { search: search || null, kategoriId: kategoriId, onlyActive: true })
-      .then(setProduk)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [search, kategoriId]);
+  // Map column key ke backend sort field
+  const SORT_FIELD = { nama: "nama", harga: "harga_jual", stok: "stok" };
+  const handleSort = (key) => {
+    if (sortBy === key) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(key);
+      setSortOrder(key === "nama" ? "asc" : "desc");
+    }
+  };
 
-  useEffect(() => {
-    Promise.all([
-      invoke("list_produk", { onlyActive: true }),
-      invoke("list_kategori"),
-    ])
-      .then(([p, k]) => {
-        setProduk(p);
-        setKategori(k);
+  const loadProduk = useCallback(() => {
+    const requestId = ++produkRequestRef.current;
+    const initialLoad = produkRef.current.length === 0;
+    if (initialLoad) setLoading(true);
+    setProdukHasMore(true);
+    invoke("list_produk", { search: search || null, kategoriId, onlyActive: false, limit: PAGE_SIZE, sortBy: SORT_FIELD[sortBy], sortOrder })
+      .then((data) => {
+        if (requestId !== produkRequestRef.current) return;
+        setProduk(data);
+        setProdukHasMore(data.length >= PAGE_SIZE);
+      })
+      .catch((error) => { if (requestId === produkRequestRef.current) console.error(error); })
+      .finally(() => { if (requestId === produkRequestRef.current) setLoading(false); });
+  }, [search, kategoriId, sortBy, sortOrder]);
+
+  // Load more via cursor (only for default sort)
+  const loadMore = useCallback(() => {
+    if (produkLoading || !produkHasMore) return;
+    const current = produkRef.current;
+    if (!current.length) return;
+    const requestId = produkRequestRef.current;
+    const last = current[current.length - 1];
+    const cursorValue = sortBy === "nama" ? last.nama : String(last[SORT_FIELD[sortBy]] ?? "0");
+    setProdukLoading(true);
+    invoke("list_produk", { search: search || null, kategoriId, onlyActive: false, limit: PAGE_SIZE, cursorId: last.id, cursorVal: cursorValue, sortBy: SORT_FIELD[sortBy], sortOrder })
+      .then((data) => {
+        if (requestId !== produkRequestRef.current) return;
+        setProduk((prev) => [...prev, ...data]);
+        setProdukHasMore(data.length >= PAGE_SIZE);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => setProdukLoading(false));
+  }, [search, kategoriId, sortBy, sortOrder, produkHasMore, produkLoading]);
+
+  // Load awal kategori
+  useEffect(() => {
+    invoke("list_kategori")
+      .then(setKategori)
+      .catch(console.error);
   }, []);
 
+  // Re-fetch saat search, kategori, atau sort berubah
   useEffect(() => { loadProduk(); }, [loadProduk]);
+
+  // Virtual scrolling untuk card view
+  const gridCols = 4;
+  const produkVirtualizer = useVirtualizer({
+    count: viewMode === "card" ? Math.ceil(produk.length / gridCols) : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 150,
+    overscan: 3,
+  });
+
+  // Infinite scroll: ketika scroll mendekati akhir, load more
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || loading || !produkHasMore || produkLoading) return;
+    const onScroll = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) loadMore();
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [produkHasMore, produkLoading, loadMore, loading]);
 
   // Escape menutup popup produk yang paling atas terlebih dahulu.
   useEffect(() => {
@@ -148,66 +210,34 @@ export default function Produk() {
     }
   };
 
-  // Import produk dari content: deteksi otomatis CSV atau XLSX.
-  const handleImportText = async (content) => {
+  // Proses file XLSX — parsing di Rust agar tidak lag di frontend
+  const processXlsxFile = async (file) => {
     try {
-      // Deteksi binary XLSX dari null bytes
-      const isBinary = content.includes("\0") || /[\x00-\x08\x0e-\x1f]/.test(content.slice(0, 1024));
-      if (isBinary) {
-        const XLSX = await import("xlsx");
-        const bytes = new Uint8Array(content.length);
-        for (let i = 0; i < content.length; i++) bytes[i] = content.charCodeAt(i) & 0xff;
-        const wb = XLSX.read(bytes, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        let headerIdx = -1;
-        for (let i = 0; i < Math.min(5, jsonData.length); i++) {
-          const row = jsonData[i];
-          if (Array.isArray(row) && (String(row[0] || "").toUpperCase() === "KODEITEM" || String(row[0] || "").toUpperCase() === "NAMAITEM")) {
-            headerIdx = i;
-            break;
-          }
-        }
-        if (headerIdx === -1) { addToast("Format XLSX tidak sesuai", "error"); return; }
-        const headers = jsonData[headerIdx].map((h) => String(h || "").toUpperCase().trim());
-        const col = (name) => headers.indexOf(name);
-        const csvLines = ["nama,sku,kategori,satuan,harga_beli,harga_jual,stok,stok_minimum"];
-        for (let i = headerIdx + 1; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          if (!Array.isArray(row)) continue;
-          const nama = String(row[col("NAMAITEM")] || "").trim();
-          if (!nama) continue;
-          const sku = String(row[col("KODEITEM")] || "").trim();
-          const satuan = String(row[col("SATUAN1")] || "pcs").trim() || "pcs";
-          const hargaBeli = String(row[col("HARGAPOKOK1")] || "0").trim();
-          const hargaJual = String(row[col("HARGAJUAL1")] || "0").trim();
-          const stok = String(row[col("STOK")] || "0").trim();
-          const stokMin = String(row[col("STOKMIN")] || "0").trim();
-          csvLines.push(`"${nama.replace(/"/g, '""')}","${sku.replace(/"/g, '""')}","","${satuan.replace(/"/g, '""')}",${hargaBeli},${hargaJual},${stok},${stokMin}`);
-        }
-        const res = await invoke("import_produk_csv", { csvText: csvLines.join("\n") });
-        setImportResult(res);
-        addToast(`Import XLSX: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
-      } else {
-        const res = await invoke("import_produk_csv", { csvText: content });
-        setImportResult(res);
-        addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
-      }
-      loadProduk();
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      const res = await invoke("import_produk_xlsx", { fileBytes: Array.from(bytes) });
+      setImportResult(res);
+      addToast(`Import XLSX: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
+      setShowImportCSV(false);
+      setSearch("");
+      setKategoriId(null);
+      setLoading(true);
+      invoke("list_produk", { onlyActive: false })
+        .then(setProduk)
+        .catch(console.error)
+        .finally(() => setLoading(false));
     } catch (e) {
-      addToast(`Gagal import: ${e}`, "error");
+      addToast(`Gagal import: ${String(e)}`, "error");
     }
   };
-
-  // Header kolom XLSX sesuai template Item.xlsx
+  // Format S multi-barcode (Item.xlsx / Item 3 / Item 4) — BARCODE1..4
   const XLSX_HEADERS = [
-    "KODEITEM", "NAMAITEM", "JENIS", "MEREK", "SATUAN1", "SATUAN2", "SATUAN3", "SATUAN4",
+    "KODEITEM", "NAMAITEM", "JENIS", "MEREK",
+    "SATUAN1", "SATUAN2", "SATUAN3", "SATUAN4",
     "BARCODE1", "BARCODE2", "BARCODE3", "BARCODE4",
     "KONVERSI1", "KONVERSI2", "KONVERSI3", "KONVERSI4",
     "HARGAPOKOK1", "HARGAPOKOK2", "HARGAPOKOK3", "HARGAPOKOK4",
     "HARGAJUAL1", "HARGAJUAL2", "HARGAJUAL3", "HARGAJUAL4",
-    "POIN1", "POIN2", "POIN3", "POIN4",
-    "KOMISISALES1", "KOMISISALES2", "KOMISISALES3", "KOMISISALES4",
     "STOK", "STOKMIN", "TIPE", "SERIAL", "RAK", "DEPT", "SUPPLIER", "KONSINYASI", "SISTEMHPP", "KETERANGAN",
   ];
 
@@ -219,18 +249,17 @@ export default function Produk() {
         ["TIPE", "S", "=> PENTING JANGAN HAPUS BARIS INI"],
         XLSX_HEADERS,
         [
-          "CONTOH", "Contoh Produk", "Minuman", "", "BOTOL", "", "", "",
-          "", "", "", "",
+          "CAM001", "Contoh Produk Multi SKU", "CAMPURAN", "MEREK A",
+          "PCS", "", "", "",
+          "8991234567890", "8991234567891", "", "",
           "1", "0", "0", "0",
           "5000", "0", "0", "0",
           "7500", "0", "0", "0",
-          "1", "0", "0", "0",
-          "0", "0", "0", "0",
-          "20", "5", "BARANG", "N", "", "UTM", "", "N", "FIFO", "Contoh produk",
+          "20", "5", "BARANG", "N", "RAK-A1", "UTM", "Supplier A", "N", "FIFO", "Keterangan",
         ],
       ];
       const ws = XLSX.utils.aoa_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, "Satuan");
+      XLSX.utils.book_append_sheet(wb, ws, "Item");
       const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { writeFile } = await import("@tauri-apps/plugin-fs");
@@ -260,26 +289,33 @@ export default function Produk() {
       const rows = [
         ["TIPE", "S", "=> PENTING JANGAN HAPUS BARIS INI"],
         XLSX_HEADERS,
-        ...produk.map((p) => [
-          p.sku || "",
-          p.nama || "",
-          "",
-          "",
-          (p.satuan || "pcs").toUpperCase(),
-          "", "", "",
-          "", "", "", "",
-          "1", "0", "0", "0",
-          String(p.harga_beli || 0), "0", "0", "0",
-          String(p.harga_jual || 0), "0", "0", "0",
-          "1", "0", "0", "0",
-          "0", "0", "0", "0",
-          String(p.stok || 0),
-          String(p.stok_minimum || 0),
-          "1", "N", "", "", "", "N", "FIFO", p.kata_kunci || "",
-        ]),
+        ...produk.map((p) => {
+          const barcodes = Array.isArray(p.skus) && p.skus.length ? p.skus : (p.sku ? [p.sku] : []);
+          return [
+            p.kode_item || "",
+            p.nama || "",
+            p.kategori_nama || "",
+            p.merek || "",
+            (p.satuan || "pcs").toUpperCase(), "", "", "",
+            barcodes[0] || "", barcodes[1] || "", barcodes[2] || "", barcodes[3] || "",
+            "1", "0", "0", "0",
+            String(p.harga_beli || 0), "0", "0", "0",
+            String(p.harga_jual || 0), "0", "0", "0",
+            String(p.stok || 0),
+            String(p.stok_minimum || 0),
+            p.tipe_item || "BARANG",
+            "N",
+            p.rak || "",
+            "",
+            p.supplier_nama || "",
+            "N",
+            "FIFO",
+            p.kata_kunci || "",
+          ];
+        }),
       ];
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      XLSX.utils.book_append_sheet(wb, ws, "Satuan");
+      XLSX.utils.book_append_sheet(wb, ws, "Item");
       const xlsxBytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       await writeFile(path, xlsxBytes);
       addToast("Data produk berhasil diexport ke XLSX", "success");
@@ -287,67 +323,6 @@ export default function Produk() {
       addToast(`Gagal export XLSX: ${e}`, "error");
     }
   };
-
-  const handleImportCSV = async () => {
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const { readTextFile, readFile } = await import("@tauri-apps/plugin-fs");
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: "Excel/CSV", extensions: ["xlsx", "csv", "txt"] }],
-      });
-      if (!selected) return;
-      const isXlsx = String(selected).toLowerCase().endsWith(".xlsx");
-      if (isXlsx) {
-        const XLSX = await import("xlsx");
-        const fileBytes = await readFile(selected);
-        const wb = XLSX.read(fileBytes, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        let headerIdx = -1;
-        for (let i = 0; i < Math.min(5, jsonData.length); i++) {
-          const row = jsonData[i];
-          if (Array.isArray(row) && (String(row[0] || "").toUpperCase() === "KODEITEM" || String(row[0] || "").toUpperCase() === "NAMAITEM")) {
-            headerIdx = i;
-            break;
-          }
-        }
-        if (headerIdx === -1) {
-          addToast("Format XLSX tidak sesuai: baris header tidak ditemukan", "error");
-          return;
-        }
-        const headers = jsonData[headerIdx].map((h) => String(h || "").toUpperCase().trim());
-        const col = (name) => headers.indexOf(name);
-        const csvLines = ["nama,sku,kategori,satuan,harga_beli,harga_jual,stok,stok_minimum"];
-        for (let i = headerIdx + 1; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          if (!Array.isArray(row)) continue;
-          const nama = String(row[col("NAMAITEM")] || "").trim();
-          if (!nama) continue;
-          const sku = String(row[col("KODEITEM")] || "").trim();
-          const satuan = String(row[col("SATUAN1")] || "pcs").trim() || "pcs";
-          const hargaBeli = String(row[col("HARGAPOKOK1")] || "0").trim();
-          const hargaJual = String(row[col("HARGAJUAL1")] || "0").trim();
-          const stok = String(row[col("STOK")] || "0").trim();
-          const stokMin = String(row[col("STOKMIN")] || "0").trim();
-          csvLines.push(`"${nama.replace(/"/g, '""')}","${sku.replace(/"/g, '""')}","","${satuan.replace(/"/g, '""')}",${hargaBeli},${hargaJual},${stok},${stokMin}`);
-        }
-        const csvText = csvLines.join("\n");
-        const res = await invoke("import_produk_csv", { csvText });
-        setImportResult(res);
-        addToast(`Import XLSX: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
-      } else {
-        const csvText = await readTextFile(selected);
-        const res = await invoke("import_produk_csv", { csvText });
-        setImportResult(res);
-        addToast(`Import: ${res.dibuat} baru, ${res.diupdate} update, ${res.dilewati} lewat`, "success");
-      }
-      loadProduk();
-    } catch (e) {
-      addToast(`Gagal import: ${e}`, "error");
-    }
-  };
-
 
   const lowStock = useMemo(() => produk.filter((p) => Number(p.stok) <= Number(p.stok_minimum || 0)), [produk]);
   const nilaiStok = useMemo(
@@ -496,55 +471,84 @@ export default function Produk() {
         emptyTitle="Belum ada produk"
         emptyHint="Tambah produk manual atau import CSV."
       >
-        {viewMode === "list" ? (
-          <DataTable columns={columns} rows={produk} rowKey={(p) => p.id} />
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12, padding: 16 }}>
-            {produk.map((p) => {
-              const low = Number(p.stok) <= Number(p.stok_minimum || 0);
-              return (
-                <div key={p.id} className="card" style={{ padding: 12, border: low ? "1px solid var(--color-expense-red)" : undefined }}>
-                  <div style={{ height: 100, borderRadius: 10, background: "var(--color-surface-container-low)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", marginBottom: 8 }}>
-                    {p.foto_path ? (
-                      <img src={convertFileSrc(p.foto_path)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <span className="material-symbols-outlined" style={{ fontSize: 36, color: "var(--color-text-secondary)" }}>inventory_2</span>
-                    )}
+        <div ref={scrollRef} className="sales-panel__scroll" style={{ height: "calc(100vh - 320px)", overflowY: "scroll", scrollbarGutter: "stable" }}>
+          {viewMode === "list" ? (
+            <DataTable columns={columns} rows={produk} rowKey={(p) => p.id}
+              sortable={["nama", "harga", "stok"]}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            />
+          ) : (
+            <div style={{ height: produkVirtualizer.getTotalSize() + "px", width: "100%", position: "relative" }}>
+              {produkVirtualizer.getVirtualItems().map((vRow) => {
+                const startIdx = vRow.index * gridCols;
+                const rowItems = produk.slice(startIdx, startIdx + gridCols);
+                return (
+                  <div
+                    key={vRow.key}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: vRow.size + "px",
+                      transform: "translateY(" + vRow.start + "px)",
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                      gap: 12,
+                    }}
+                  >
+                    {rowItems.map((p) => {
+                      const low = Number(p.stok) <= Number(p.stok_minimum || 0);
+                      return (
+                        <div key={p.id} className="card" style={{ padding: 12, border: low ? "1px solid var(--color-expense-red)" : undefined }}>
+                          <div style={{ height: 100, borderRadius: 10, background: "var(--color-surface-container-low)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", marginBottom: 8 }}>
+                            {p.foto_path ? (
+                              <img src={convertFileSrc(p.foto_path)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ) : (
+                              <span className="material-symbols-outlined" style={{ fontSize: 36, color: "var(--color-text-secondary)" }}>inventory_2</span>
+                            )}
+                          </div>
+                          <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{p.nama}</div>
+                          <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{p.sku || "—"}</div>
+                          <div style={{ marginTop: 6 }}>
+                            {isDiskonAktif(p) ? (
+                              <>
+                                <span style={{ textDecoration: "line-through", fontSize: 11, color: "var(--color-text-secondary)", marginRight: 6 }}>{rupiah(p.harga_jual)}</span>
+                                <strong style={{ color: "var(--color-expense-red)" }}>{rupiah(hargaAktif(p))}</strong>
+                              </>
+                            ) : (
+                              <strong>{rupiah(hargaAktif(p))}</strong>
+                            )}
+                          </div>
+                          <div style={{ marginTop: 4 }}>
+                            <StatusBadge label={"Stok " + p.stok} tone={low ? "danger" : "success"} />
+                          </div>
+                          <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+                            <button type="button" className="btn-icon" onClick={() => { setEditId(p.id); setShowForm(true); }} aria-label="edit">
+                              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit</span>
+                            </button>
+                            <button type="button" className="btn-icon" onClick={() => openAdjust(p)} aria-label="adjust">
+                              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>tune</span>
+                            </button>
+                            <button type="button" className="btn-icon" onClick={() => setBarcodeItem(p)} aria-label="barcode">
+                              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>barcode</span>
+                            </button>
+                            <button type="button" className="btn-icon" onClick={() => handleDelete(p.id, p.nama)} aria-label="hapus">
+                              <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--color-expense-red)" }}>delete</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{p.nama}</div>
-                  <div className="text-label-md" style={{ color: "var(--color-text-secondary)" }}>{p.sku || "—"}</div>
-                  <div style={{ marginTop: 6 }}>
-                    {isDiskonAktif(p) ? (
-                      <>
-                        <span style={{ textDecoration: "line-through", fontSize: 11, color: "var(--color-text-secondary)", marginRight: 6 }}>{rupiah(p.harga_jual)}</span>
-                        <strong style={{ color: "var(--color-expense-red)" }}>{rupiah(hargaAktif(p))}</strong>
-                      </>
-                    ) : (
-                      <strong>{rupiah(hargaAktif(p))}</strong>
-                    )}
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <StatusBadge label={`Stok ${p.stok}`} tone={low ? "danger" : "success"} />
-                  </div>
-                  <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
-                    <button type="button" className="btn-icon" onClick={() => { setEditId(p.id); setShowForm(true); }} aria-label="edit">
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit</span>
-                    </button>
-                    <button type="button" className="btn-icon" onClick={() => openAdjust(p)} aria-label="adjust">
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>tune</span>
-                    </button>
-                    <button type="button" className="btn-icon" onClick={() => setBarcodeItem(p)} aria-label="barcode">
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>barcode</span>
-                    </button>
-                    <button type="button" className="btn-icon" onClick={() => handleDelete(p.id, p.nama)} aria-label="hapus">
-                      <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--color-expense-red)" }}>delete</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+          {produkLoading && <div style={{ textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>Memuat...</div>}
+        </div>
       </DataPanel>
 
       {showForm && (
@@ -601,19 +605,9 @@ export default function Produk() {
               Format: KODEITEM, NAMAITEM, JENIS, SATUAN1, HARGAPOKOK1, HARGAJUAL1, STOK, STOKMIN
             </p>
             <DropZoneImport
-              title="Pilih atau Drop File CSV di sini"
-              subtitle="CSV/Excel produk massal"
-              onText={async (text) => {
-                try {
-                  await handleImportText(text);
-                } catch (e) {
-                  addToast(String(e), "error");
-                }
-              }}
+              title="Pilih atau Drop File XLSX di sini"
+              onFile={async (file) => { await processXlsxFile(file); }}
             />
-            <button type="button" className="btn-secondary" style={{ width: "100%", marginTop: 8 }} onClick={handleImportCSV}>
-              Pilih File Native
-            </button>
             {importResult && (
               <div className="card" style={{ padding: "0.75rem", marginTop: "0.75rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>Dibuat</span><strong>{importResult.dibuat}</strong></div>
@@ -695,13 +689,17 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
     nama: "", kata_kunci: "", kategori_id: null, supplier_id: null, sku: "", satuan: "pcs",
     harga_beli: "", harga_jual: "", stok: "", stok_minimum: "",
     harga_diskon: "", diskon_berlaku_sampai: "",
+    merek: "", tipe_item: "BARANG", rak: "", kode_item: "",
   });
+  // Multi-SKU: SKU pertama = utama (tampil di kasir); sisanya barcode alternatif.
+  const [skus, setSkus] = useState([""]);
   const [marginPersen, setMarginPersen] = useState("");
   // State khusus foto produk: path dari Rust (persisten) dan preview base64 lokal.
   const [fotoPath, setFotoPath] = useState(null);
   const [fotoPreview, setFotoPreview] = useState(null);
   const [fotoDirty, setFotoDirty] = useState(false);
   const [scanSkuOpen, setScanSkuOpen] = useState(false); // Modal scan barcode untuk SKU
+  const [scanSkuIndex, setScanSkuIndex] = useState(0);
 
   useEffect(() => { setKatList(kategori); }, [kategori]);
   useEffect(() => { invoke("list_supplier").then(setSupplierList).catch(console.error); }, []);
@@ -709,14 +707,20 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
   useEffect(() => {
     if (editId) {
       invoke("get_produk", { id: editId }).then((p) => {
+        const list = Array.isArray(p.skus) && p.skus.length ? p.skus : (p.sku ? [p.sku] : [""]);
+        setSkus(list.length ? list : [""]);
         setForm({
-          nama: p.nama, kata_kunci: p.kata_kunci || "", kategori_id: p.kategori_id, supplier_id: p.supplier_id, sku: p.sku || "",
+          nama: p.nama, kata_kunci: p.kata_kunci || "", kategori_id: p.kategori_id, supplier_id: p.supplier_id, sku: list[0] || p.sku || "",
           // Migrasi satuan lama ke singkatan baru via alias agar produk existing tidak error.
           satuan: UNIT_ALIASES[p.satuan] || p.satuan, harga_beli: String(p.harga_beli),
           harga_jual: String(p.harga_jual), stok: String(p.stok),
           stok_minimum: String(p.stok_minimum),
           harga_diskon: p.harga_diskon ? String(p.harga_diskon) : "",
           diskon_berlaku_sampai: p.diskon_berlaku_sampai || "",
+          merek: p.merek || "",
+          tipe_item: p.tipe_item || "BARANG",
+          rak: p.rak || "",
+          kode_item: p.kode_item || "",
         });
         // Inisialisasi foto produk: konversi path absolut ke URL yang bisa dirender WebView.
         setFotoPath(p.foto_path || null);
@@ -778,12 +782,14 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
     if (!form.harga_jual) { addToast("Harga jual wajib diisi", "error"); return; }
     setSaving(true);
     try {
+      const skuList = skus.map((s) => s.trim()).filter(Boolean);
       const input = {
         nama: form.nama.trim(),
         kata_kunci: (form.kata_kunci || "").trim() || null,
         kategori_id: form.kategori_id || null,
         supplier_id: form.supplier_id || null,
-        sku: form.sku.trim() || null,
+        sku: skuList[0] || null,
+        skus: skuList,
         satuan: form.satuan.trim() || "pcs",
         harga_beli: parseInt(form.harga_beli) || 0,
         harga_jual: parseInt(form.harga_jual),
@@ -792,6 +798,10 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
          foto_path: fotoPath,
          harga_diskon: parseInt(form.harga_diskon) || 0,
         diskon_berlaku_sampai: form.diskon_berlaku_sampai || null,
+        merek: form.merek?.trim() || null,
+        tipe_item: form.tipe_item?.trim() || null,
+        rak: form.rak?.trim() || null,
+        kode_item: form.kode_item?.trim() || null,
       };
       let savedId = editId;
       if (editId) {
@@ -919,31 +929,62 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
               placeholder="— Pilih Supplier —"
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-            <div>
-              <label className="input-label">SKU</label>
-              {/* SKU bisa diketik manual atau diisi dari scanner native camera yang sama dengan Kasir. */}
-              <div style={{ display: "flex", gap: 6 }}>
-                <input className="input-field" style={{ flex: 1 }} value={form.sku} onChange={set("sku")} placeholder="Opsional" />
-                <button
-                  type="button"
-                  className="btn-icon"
-                  title="Scan SKU dari barcode"
-                  onClick={() => setScanSkuOpen(true)}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>qr_code_scanner</span>
-                </button>
-              </div>
+          <div>
+            <label className="input-label">SKU / Barcode</label>
+            <p style={{ fontSize: 11, color: "var(--color-text-secondary)", margin: "0 0 6px" }}>
+              SKU pertama tampil di kasir. Tambah barcode lain untuk warna/varian yang sama.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {skus.map((s, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 52 }}>
+                    {idx === 0 ? "Utama" : `#${idx + 1}`}
+                  </span>
+                  <input
+                    className="input-field"
+                    style={{ flex: 1 }}
+                    value={s}
+                    onChange={(e) => setSkus((prev) => prev.map((x, i) => (i === idx ? e.target.value : x)))}
+                    placeholder={idx === 0 ? "SKU / barcode utama" : "Barcode tambahan"}
+                  />
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    title="Scan barcode"
+                    onClick={() => { setScanSkuIndex(idx); setScanSkuOpen(true); }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>qr_code_scanner</span>
+                  </button>
+                  {skus.length > 1 && (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      title="Hapus"
+                      onClick={() => setSkus((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ alignSelf: "flex-start", fontSize: 12, padding: "4px 10px" }}
+                onClick={() => setSkus((prev) => [...prev, ""])}
+              >
+                + Tambah SKU
+              </button>
             </div>
-            <div>
-              <label className="input-label">Satuan</label>
+          </div>
+          <div>
+            <label className="input-label">Satuan</label>
             <SearchSelect
               value={form.satuan}
               onChange={(v) => setForm((prev) => ({ ...prev, satuan: v }))}
               options={UNIT_OPTIONS.flatMap((g) => g.options.map(([val, label]) => ({ value: val, label })))}
               placeholder="pcs"
             />
-            </div>
           </div>
           <div>
             <label className="input-label">Harga Beli</label>
@@ -988,6 +1029,24 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
             <label className="input-label">Berlaku Sampai</label>
             <DateField value={form.diskon_berlaku_sampai} onChange={(v) => set("diskon_berlaku_sampai")({ target: { value: v } })} />
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label className="input-label">Merek</label>
+              <input className="input-field" value={form.merek} onChange={set("merek")} placeholder="Opsional" />
+            </div>
+            <div>
+              <label className="input-label">Tipe Item</label>
+              <select className="input-field" value={form.tipe_item} onChange={set("tipe_item")}>
+                <option value="BARANG">BARANG</option>
+                <option value="JASA">JASA</option>
+                <option value="PAKET">PAKET</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="input-label">Rak / Lokasi</label>
+            <input className="input-field" value={form.rak} onChange={set("rak")} placeholder="Contoh: RAK-A1" />
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: editId ? "1fr" : "1fr 1fr", gap: "0.75rem" }}>
              {!editId && (
                <div>
@@ -1013,7 +1072,8 @@ function ProdukForm({ editId, kategori, onClose, onSaved, onCategoryCreated }) {
         <BarcodeScanner
           onDetected={(value) => {
             if (value && value.trim()) {
-              setForm((prev) => ({ ...prev, sku: value.trim() }));
+              const v = value.trim();
+              setSkus((prev) => prev.map((x, i) => (i === scanSkuIndex ? v : x)));
             }
             setScanSkuOpen(false);
           }}

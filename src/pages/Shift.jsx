@@ -46,14 +46,14 @@ export default function Shift() {
         const open = data.find((s) => s.status === "open");
         setActiveShift(open || null);
       })
-      .catch((e) => addToast(`Gagal memuat shift: ${e}`, "error"))
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat shift: ${_m}`,"error"); })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     invoke("get_current_user")
       .then(setCurrentUser)
-      .catch((e) => addToast(`Gagal memuat sesi: ${e}`, "error"));
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal memuat sesi: ${_m}`,"error"); });
     load();
   }, []);
 
@@ -74,7 +74,7 @@ export default function Shift() {
       setForm({ nama: "", cashbox_id: cashboxes.length === 1 ? String(cashboxes[0].id) : "", rows: initialOpeningRows() });
       load();
     } catch (e) {
-      addToast(`Gagal buka shift: ${e}`, "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(`Gagal buka shift: ${_m}`,"error"); };
     }
   };
 

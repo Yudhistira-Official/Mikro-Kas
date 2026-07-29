@@ -144,6 +144,7 @@ pub fn tukar_point(
     jumlah_point: i64,
     transaksi_id: Option<i64>,
 ) -> Result<i64, String> {
+    if jumlah_point <= 0 { return Err("Jumlah point harus lebih besar dari 0".into()); }
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -172,8 +173,8 @@ pub fn tukar_point(
         )
         .map_err(|e| e.to_string())?;
 
-    let nilai_diskon = jumlah_point * rupiah_per_point;
-    let saldo_sesudah = saldo_sekarang - jumlah_point;
+    let nilai_diskon = jumlah_point.checked_mul(rupiah_per_point).ok_or("Nilai diskon melebihi batas angka")?;
+    let saldo_sesudah = saldo_sekarang.checked_sub(jumlah_point).ok_or("Saldo point tidak mencukupi untuk dikurangi")?;
 
     tx.execute(
         "INSERT INTO point_log (customer_id, transaksi_id, tipe, point, saldo_sebelum, saldo_sesudah, keterangan)

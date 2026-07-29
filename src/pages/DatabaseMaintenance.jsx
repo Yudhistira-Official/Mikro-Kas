@@ -20,7 +20,7 @@ export default function DatabaseMaintenance() {
       addToast("Maintenance selesai", "success");
     } catch (e) {
       setResult(`Maintenance gagal: ${String(e)}`);
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setLoading(false);
     }

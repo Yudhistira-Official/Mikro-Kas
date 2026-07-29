@@ -8,7 +8,8 @@
 //   - Tombol WA membuka whatsapp://send?phone=<nomor> via Tauri opener
 //     agar keluar dari WebView dan langsung menuju aplikasi WhatsApp
 // ============================================================
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { VirtualDataTable } from "../components/VirtualDataTable";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
@@ -42,19 +43,24 @@ export default function Supplier() {
   const [hargaForm, setHargaForm] = useState({ produk_id: "", harga: "", satuan: "pcs", catatan: "" });
 
   const [query, setQuery] = useState("");
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE_SIZE = 50;
 
   // -------------------------------------------------------
   // LOAD — ambil semua supplier dari backend.
   // -------------------------------------------------------
-  const load = () => {
-    setLoading(true);
-    invoke("list_supplier")
-      .then(setList)
-      .catch(e => addToast(String(e), "error"))
+  const load = (offset = 0, append = false, searchValue = query) => {
+    if (!append) setLoading(true);
+    invoke("list_supplier", { search: searchValue || null, limit: PAGE_SIZE, offset })
+      .then((data) => { setList((prev) => append ? [...prev, ...data] : data); setHasMore(data.length >= PAGE_SIZE); })
+      .catch(e => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => load(0, false, query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   // Load produk untuk dropdown catatan harga
   useEffect(() => {
@@ -271,6 +277,14 @@ export default function Supplier() {
     }
   }, [showForm, detailItem]);
 
+  const filteredSuppliers = useMemo(() => list.filter((s) => `${s.nama} ${s.telepon || ""} ${s.alamat || ""}`.toLowerCase().includes(query.toLowerCase())), [list, query]);
+  const supplierColumns = [
+    { key: "nama", label: "Supplier", render: (s) => <button className="sales-name" onClick={() => setDetailItem(s)}><span className="sales-avatar">{s.nama.charAt(0).toUpperCase()}</span><span><strong>{s.nama}</strong><small>{s.deskripsi_tambahan || "Supplier"}</small></span></button> },
+    { key: "telepon", label: "Telepon", render: (s) => s.telepon || "-" },
+    { key: "alamat", label: "Alamat", render: (s) => s.alamat || "-" },
+    { key: "aksi", label: "Aksi", render: (s) => <div className="sales-row-actions">{s.telepon && <button className="btn-icon" onClick={(e) => { e.stopPropagation(); chatWA(s.telepon); }} title="Chat WhatsApp"><span className="material-symbols-outlined">chat</span></button>}<button className="btn-icon" onClick={(e) => { e.stopPropagation(); edit(s); }} title="Edit"><span className="material-symbols-outlined">edit</span></button><button className="btn-icon" onClick={(e) => { e.stopPropagation(); hapus(s.id); }} title="Hapus"><span className="material-symbols-outlined">delete</span></button></div> },
+  ];
+
   return (
     <PageShell
       eyebrow="MASTER DATA"
@@ -294,24 +308,7 @@ export default function Supplier() {
           <div className="sales-search"><span className="material-symbols-outlined">search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari nama, telepon, atau alamat..." /></div>
           <button className="btn-secondary" onClick={load}><span className="material-symbols-outlined">refresh</span>Refresh</button>
         </div>
-        {loading ? <div className="loading-page"><div className="spinner" /></div> :
-         list.filter(s => `${s.nama} ${s.telepon || ""} ${s.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).length === 0 ?
-          <div className="empty-state"><span className="material-symbols-outlined">local_shipping</span><p>Belum ada supplier</p></div> : (
-          <div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>Supplier</th><th>Telepon</th><th>Alamat</th><th>Aksi</th></tr></thead><tbody>
-            {list.filter(s => `${s.nama} ${s.telepon || ""} ${s.alamat || ""}`.toLowerCase().includes(query.toLowerCase())).map((s) => (
-              <tr key={s.id}>
-                <td><button className="sales-name" onClick={() => setDetailItem(s)}><span className="sales-avatar">{s.nama.charAt(0).toUpperCase()}</span><span><strong>{s.nama}</strong><small>{s.deskripsi_tambahan || "Supplier"}</small></span></button></td>
-                <td>{s.telepon || "-"}</td>
-                <td>{s.alamat || "-"}</td>
-                <td><div className="sales-row-actions">
-                  {s.telepon && <button className="btn-icon" onClick={(e) => { e.stopPropagation(); chatWA(s.telepon); }} title="Chat WhatsApp" style={{ color: "#25D366" }}><span className="material-symbols-outlined">chat</span></button>}
-                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); edit(s); }} title="Edit"><span className="material-symbols-outlined">edit</span></button>
-                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); hapus(s.id); }} style={{ color: "var(--color-expense-red)" }} title="Hapus"><span className="material-symbols-outlined">delete</span></button>
-                </div></td>
-              </tr>
-            ))}
-          </tbody></table></div>
-        )}
+        <VirtualDataTable columns={supplierColumns} rows={filteredSuppliers} rowKey={(s) => s.id} loading={loading} hasMore={hasMore} onEndReached={() => { if (!loading && hasMore) load(list.length, true, query); }} emptyMessage="Belum ada supplier" />
       </section>
 
       {/* MODAL DETAIL SUPPLIER */}

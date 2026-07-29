@@ -1,3 +1,4 @@
+use crate::commands::user_cmd::{require_authenticated, AuthState};
 use crate::db::DbState;
 use crate::models::transaksi::{
     ItemInput, Transaksi, TransaksiDetail, TransaksiItemDetail, TransaksiResult,
@@ -44,6 +45,7 @@ pub struct LaporanPembelianRow {
 #[tauri::command]
 pub fn buat_transaksi_penjualan(
     state: State<DbState>,
+    auth: State<AuthState>,
     items: Vec<ItemInput>,
     metode_bayar: String,
     catatan: Option<String>,
@@ -53,7 +55,16 @@ pub fn buat_transaksi_penjualan(
     biaya_layanan: Option<i64>,
     ongkir: Option<i64>,
     sales_id: Option<i64>,
+    // Uang diterima kasir (tunai/transfer/qris). Untuk hitung kembalian di struk.
+    dibayar: Option<i64>,
 ) -> Result<TransaksiResult, String> {
+    require_authenticated(&auth)?;
+    // Ambil user session untuk user_id + kode role di struk (ADM/KSR/...).
+    let session_user = {
+        let guard = auth.0.lock().map_err(|e| e.to_string())?;
+        guard.clone()
+    };
+    let user_id = session_user.as_ref().map(|u| u.id);
     crate::logger::log(&format!(
         "COMMAND: buat_transaksi_penjualan dipanggil; items_count={}, metode_bayar={}",
         items.len(),
@@ -66,6 +77,9 @@ pub fn buat_transaksi_penjualan(
     let mut item_rows = Vec::new();
 
     for item in &items {
+        if item.qty <= 0 {
+            return Err("Qty item harus lebih besar dari 0".into());
+        }
         // Ambil harga aktif dari DB. Jika satuan pilihan dipakai, backend validasi dari JSON produk.
         let (harga_base, stok, nama, satuan_multi): (i64, i64, String, Option<String>) = tx
             .query_row(
@@ -107,8 +121,8 @@ pub fn buat_transaksi_penjualan(
             return Err(format!("Stok {} tidak cukup (tersedia: {})", nama, stok));
         }
 
-        let subtotal = harga_jual * item.qty;
-        total += subtotal;
+        let subtotal = harga_jual.checked_mul(item.qty).ok_or("Subtotal melebihi batas angka")?;
+        total = total.checked_add(subtotal).ok_or("Total transaksi melebihi batas angka")?;
         item_rows.push((item.produk_id, item.qty, harga_jual, subtotal));
 
         // Kurangi stok dasar: satuan besar dikonversi ke stok dasar produk.
@@ -127,6 +141,7 @@ pub fn buat_transaksi_penjualan(
     let biaya = biaya_layanan.unwrap_or(0).max(0);
     let ongkir_val = ongkir.unwrap_or(0).max(0);
     let total_final = total - diskon + pajak + biaya + ongkir_val;
+    let dibayar_val = dibayar.unwrap_or(0).max(0);
     let catatan_final = match (catatan, customer_id, diskon > 0) {
         (Some(c), Some(cid), true) => Some(format!("{c} | customer_id={cid} | diskon={diskon}")),
         (Some(c), Some(cid), false) => Some(format!("{c} | customer_id={cid}")),
@@ -139,9 +154,9 @@ pub fn buat_transaksi_penjualan(
     };
 
     tx.execute(
-        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, pajak_nominal, biaya_layanan, ongkir, sales_id)
-         VALUES ('penjualan', ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![total_final, metode_bayar, catatan_final, pajak, biaya, ongkir_val, sales_id],
+        "INSERT INTO transaksi (tipe, total, metode_bayar, catatan, pajak_nominal, biaya_layanan, ongkir, sales_id, dibayar, user_id)
+         VALUES ('penjualan', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![total_final, metode_bayar, catatan_final, pajak, biaya, ongkir_val, sales_id, dibayar_val, user_id],
     )
     .map_err(|e| e.to_string())?;
     let transaksi_id: i64 = tx.last_insert_rowid();
@@ -165,12 +180,14 @@ pub fn buat_transaksi_penjualan(
 #[tauri::command]
 pub fn buat_transaksi_pembelian(
     state: State<DbState>,
+    auth: State<AuthState>,
     items: Vec<ItemInput>,
     catatan: Option<String>,
     supplier_id: Option<i64>,
     dp_nominal: Option<i64>,
     jatuh_tempo: Option<String>,
 ) -> Result<TransaksiResult, String> {
+    require_authenticated(&auth)?;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -210,8 +227,8 @@ pub fn buat_transaksi_pembelian(
             .map_err(|e| e.to_string())?;
         }
 
-        let subtotal = harga_beli * item.qty;
-        total += subtotal;
+        let subtotal = harga_beli.checked_mul(item.qty).ok_or("Subtotal pembelian melebihi batas angka")?;
+        total = total.checked_add(subtotal).ok_or("Total pembelian melebihi batas angka")?;
         item_rows.push((item.produk_id, item.qty, harga_beli, subtotal, nama));
     }
 
@@ -285,6 +302,7 @@ pub fn list_transaksi(
     offset: Option<i64>,
 ) -> Result<Vec<Transaksi>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+    crate::db::ensure_column(&conn, "transaksi", "sales_id", "INTEGER REFERENCES sales(id) ON DELETE SET NULL");
     let mut sql = String::from(
         "WITH RankedTransaksi AS ( \
            SELECT id, ROW_NUMBER() OVER (PARTITION BY strftime('%Y-%m', tanggal) ORDER BY id ASC) as no_nota \
@@ -616,9 +634,11 @@ pub fn get_transaksi_detail(state: State<DbState>, id: i64) -> Result<TransaksiD
 #[tauri::command]
 pub fn edit_transaksi_penjualan(
     state: State<DbState>,
+    auth: State<AuthState>,
     id: i64,
     input: UpdatePenjualanInput,
 ) -> Result<TransaksiResult, String> {
+    require_authenticated(&auth)?;
     if input.items.is_empty() {
         return Err("Transaksi harus memiliki minimal satu produk".into());
     }
@@ -691,6 +711,7 @@ pub fn edit_transaksi_penjualan(
     let mut new_stoks: BTreeMap<i64, i64> = BTreeMap::new();
 
     for item in &input.items {
+        if item.qty <= 0 { return Err("Qty item harus lebih besar dari 0".into()); }
         let (harga_jual, stok, nama): (i64, i64, String) = tx
             .query_row(
                 "SELECT harga_jual, stok, nama FROM produk WHERE id = ?1 AND is_active = 1",
@@ -701,8 +722,8 @@ pub fn edit_transaksi_penjualan(
         if stok < item.qty {
             return Err(format!("Stok {} tidak cukup (tersedia: {})", nama, stok));
         }
-        let subtotal = harga_jual * item.qty;
-        total += subtotal;
+        let subtotal = harga_jual.checked_mul(item.qty).ok_or("Subtotal melebihi batas angka")?;
+        total = total.checked_add(subtotal).ok_or("Total transaksi melebihi batas angka")?;
         *new_stoks.entry(item.produk_id).or_insert(0) += item.qty;
 
         tx.execute(
@@ -735,7 +756,8 @@ pub fn edit_transaksi_penjualan(
 
 /// Hapus transaksi penjualan & kembalikan stok. Batas 2 hari.
 #[tauri::command]
-pub fn delete_transaksi_penjualan(state: State<DbState>, id: i64) -> Result<(), String> {
+pub fn delete_transaksi_penjualan(state: State<DbState>, auth: State<AuthState>, id: i64) -> Result<(), String> {
+    require_authenticated(&auth)?;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
 
     let (tipe, created_at): (String, String) = conn

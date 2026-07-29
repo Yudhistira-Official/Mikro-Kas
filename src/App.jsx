@@ -15,7 +15,8 @@ import { invoke } from "./utils/ipc";
 import DesktopLayout from "./layouts/DesktopLayout";
 import MobileLayout from "./layouts/MobileLayout";
 import { usePlatform } from "./layouts/usePlatform";
-import { applyWindowMode } from "./utils/windowMode";
+import { applyWindowMode, getUserWindowMode, toggleFullscreen } from "./utils/windowMode";
+import { canAccessPath } from "./utils/permissions";
 
 // Android WebView pada perangkat ini crash saat memuat Vite dynamic chunks
 // (TypeError: z is not a function). Semua halaman memakai static import.
@@ -28,6 +29,7 @@ import Qris from "./pages/Qris";
 import TokoSetup from "./pages/TokoSetup";
 import Profile from "./pages/Profile";
 import Sistem from "./pages/Sistem";
+import CustomerDisplay from "./pages/CustomerDisplay";
 import Keuangan from "./pages/Keuangan";
 import Pembelian from "./pages/Pembelian";
 import Riwayat from "./pages/Riwayat";
@@ -126,6 +128,12 @@ function RouteTracker() {
   return null;
 }
 
+function RoleGuard({ currentUser, children }) {
+  const location = useLocation();
+  if (canAccessPath(currentUser?.role, location.pathname)) return children;
+  return <Navigate to={currentUser?.role === "kasir" ? "/transaksi" : "/"} replace />;
+}
+
 function App() {
   const platform = usePlatform();
   const navigate = useNavigate();
@@ -135,6 +143,7 @@ function App() {
   const [loggingOut, setLoggingOut] = useState(false);
   
   const AppLayout = platform === "mobile" ? MobileLayout : DesktopLayout;
+  const rolePath = (path, element) => canAccessPath(currentUser?.role, path) ? element : <Navigate to={currentUser?.role === "kasir" ? "/transaksi" : "/"} replace />;
 
   const fetchToko = useCallback(() => {
     invoke("get_toko")
@@ -178,16 +187,32 @@ function App() {
         .replace(/\s+/g, " ").trim().slice(0, 100);
       jslog(`UI: klik ${target.tagName.toLowerCase()}=${action}; route=${window.location.pathname}`);
     };
+    // F11 global: toggle fullscreen (capture, sebelum handler lain)
+    const onF11 = (e) => {
+      if (e.key !== "F11") return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFullscreen()
+        .then((next) => jslog(`APP: F11 fullscreen → ${next}`))
+        .catch((err) => jslog(`APP: F11 gagal → ${err}`));
+    };
     window.addEventListener("toko-saved", handler);
     window.addEventListener("user-updated", userHandler);
     document.addEventListener("click", auditClick);
+    window.addEventListener("keydown", onF11, true);
     return () => {
       window.removeEventListener("toko-saved", handler);
       window.removeEventListener("user-updated", userHandler);
       document.removeEventListener("click", auditClick);
+      window.removeEventListener("keydown", onF11, true);
       jslog("APP: App unmount");
     };
   }, [fetchToko]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    applyWindowMode(getUserWindowMode(currentUser.id));
+  }, [currentUser]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -229,22 +254,23 @@ function App() {
         </div>
       )}
       <Routes>
+        <Route path="/customer-display" element={<CustomerDisplay />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route element={<AppLayout currentUser={currentUser} onLogout={handleLogout} loggingOut={loggingOut} />}>
+        <Route element={<RoleGuard currentUser={currentUser}><AppLayout currentUser={currentUser} onLogout={handleLogout} loggingOut={loggingOut} /></RoleGuard>}>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/produk" element={<Produk />} />
-          <Route path="/transaksi" element={<Transaksi />} />
-          <Route path="/kas" element={<Kas />} />
+          <Route path="/produk" element={rolePath("/produk", <Produk />)} />
+          <Route path="/transaksi" element={rolePath("/transaksi", <Transaksi />)} />
+          <Route path="/kas" element={rolePath("/kas", <Kas />)} />
           <Route path="/qris" element={platform === "mobile" ? <Qris /> : <Navigate to="/" replace />} />
           <Route path="/toko" element={currentUser?.role === "admin" ? <Profile /> : <Navigate to="/" replace />} />
-          <Route path="/sistem" element={<Sistem />} />
+          <Route path="/sistem" element={<Sistem currentUser={currentUser} />} />
           <Route path="/qris-setup" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
           <Route path="/profile" element={<Navigate to={currentUser?.role === "admin" ? "/toko" : "/sistem"} replace />} />
-          <Route path="/keuangan" element={<Keuangan />} />
-          <Route path="/pembelian" element={<Pembelian />} />
-          <Route path="/riwayat-pembelian" element={<RiwayatPembelian />} />
-          <Route path="/riwayat" element={<Riwayat />} />
-          <Route path="/laporan" element={<Laporan />} />
+          <Route path="/keuangan" element={rolePath("/keuangan", <Keuangan />)} />
+          <Route path="/pembelian" element={rolePath("/pembelian", <Pembelian />)} />
+          <Route path="/riwayat-pembelian" element={rolePath("/riwayat-pembelian", <RiwayatPembelian />)} />
+          <Route path="/riwayat" element={rolePath("/riwayat", <Riwayat />)} />
+          <Route path="/laporan" element={rolePath("/laporan", <Laporan />)} />
           <Route path="/log" element={<Log />} />
           <Route path="/customer" element={<Customer />} />
           <Route path="/supplier" element={<Supplier />} />
@@ -254,9 +280,9 @@ function App() {
           <Route path="/promo" element={<Promo />} />
           <Route path="/pesanan" element={<Pesanan />} />
           <Route path="/backup-restore" element={currentUser?.role === "admin" ? <BackupRestore /> : <Navigate to="/" replace />} />
-          <Route path="/riwayat-stok" element={<RiwayatStok />} />
-          <Route path="/shift" element={<Shift />} />
-          <Route path="/stock-opname" element={<StockOpname />} />
+          <Route path="/riwayat-stok" element={rolePath("/riwayat-stok", <RiwayatStok />)} />
+          <Route path="/shift" element={rolePath("/shift", <Shift />)} />
+          <Route path="/stock-opname" element={rolePath("/stock-opname", <StockOpname />)} />
           <Route path="/advanced" element={<AdvancedModules />} />
           <Route path="/qris-profil" element={platform === "mobile" ? <TokoSetup /> : <Navigate to="/" replace />} />
           <Route path="/users" element={currentUser?.role === "admin" ? <UserManagement /> : <Navigate to="/" replace />} />

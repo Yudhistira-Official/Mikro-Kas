@@ -3,6 +3,21 @@
 
 const STORAGE_KEY = "mikrokas_window_mode";
 
+export function preferenceKey(userId, name) {
+  return `mikrokas_${name}_${userId || "guest"}`;
+}
+
+export function getUserWindowMode(userId) {
+  const value = localStorage.getItem(preferenceKey(userId, "window_mode"));
+  return value === "fullscreen" ? "fullscreen" : "windowed";
+}
+
+export function setUserWindowMode(userId, mode) {
+  const next = mode === "fullscreen" ? "fullscreen" : "windowed";
+  localStorage.setItem(preferenceKey(userId, "window_mode"), next);
+  return next;
+}
+
 /**
  * Reads preferred window mode from localStorage.
  * Returns: "windowed" | "fullscreen"
@@ -53,7 +68,19 @@ export async function toggleFullscreen() {
     const win = getCurrentWindow();
     const isFullscreen = await win.isFullscreen();
     await win.setFullscreen(!isFullscreen);
-  } catch {
-    // Browser / non-Tauri: skip
+    return !isFullscreen;
+  } catch (e) {
+    // Fallback browser API (dev / non-Tauri)
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+        return true;
+      }
+      await document.exitFullscreen?.();
+      return false;
+    } catch {
+      console.warn("toggleFullscreen gagal:", e);
+      return null;
+    }
   }
 }

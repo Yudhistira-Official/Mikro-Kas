@@ -85,7 +85,7 @@ export default function PajakSetting() {
         setForm({ ppnMode: data.ppn_mode || "exclude", ppnPersen: data.ppn_persen ?? 11 });
         setDirty(false);
       })
-      .catch((e) => addToast(String(e), "error"))
+      .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
       .finally(() => setLoading(false));
   };
 
@@ -108,7 +108,7 @@ export default function PajakSetting() {
       setSetting(updated);
       setDirty(false);
     } catch (e) {
-      addToast(String(e), "error");
+      { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
       setSaving(false);
     }

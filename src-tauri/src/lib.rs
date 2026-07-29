@@ -45,6 +45,7 @@ pub fn run() {
             commands::kategori_cmd::delete_kategori,
             // Produk
             commands::produk_cmd::list_produk,
+            commands::produk_cmd::list_produk_kasir,
             commands::produk_cmd::get_produk,
             commands::produk_cmd::create_produk,
             commands::produk_cmd::update_produk,
@@ -54,6 +55,7 @@ pub fn run() {
             commands::produk_cmd::list_stock_adjustments,
             commands::produk_cmd::reverse_stock_adjustment,
             commands::produk_cmd::import_produk_csv,
+            commands::produk_cmd::import_produk_xlsx,
             commands::produk_cmd::save_produk_foto,
             commands::produk_cmd::delete_produk_foto,
             commands::produk_cmd::get_ringkasan_inventori,
@@ -252,6 +254,11 @@ pub fn run() {
             // Phase 1-2: Printer, display, pricing, export, pengiriman
             commands::printer_cmd::build_struk_text,
             commands::printer_cmd::print_struk,
+             commands::hardware_cmd::get_hardware_settings,
+             commands::hardware_cmd::set_hardware_settings,
+             commands::hardware_cmd::test_print_struk,
+             commands::hardware_cmd::list_serial_scanner_ports,
+             commands::hardware_cmd::read_serial_barcode,
             commands::printer_cmd::list_printer_candidates,
             commands::customer_display_cmd::get_customer_display_data,
             commands::pricing_cmd::hitung_diskon_bertingkat,
@@ -267,6 +274,8 @@ pub fn run() {
             commands::stock_opname_cmd::list_stock_opname,
             commands::stock_opname_cmd::get_stock_opname,
             commands::stock_opname_cmd::export_stock_opname_docx,
+            // Factory reset command (admin only)
+            commands::factory_reset_cmd::factory_reset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MikroKas");
