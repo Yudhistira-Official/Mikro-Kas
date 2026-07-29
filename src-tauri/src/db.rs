@@ -223,6 +223,8 @@ pub fn init_db(app_dir: PathBuf) -> Result<Connection, String> {
         "INSERT OR IGNORE INTO produk_sku (produk_id, sku, is_primary)
          SELECT id, sku, 1 FROM produk WHERE sku IS NOT NULL AND trim(sku) != '';",
     );
+    let _ = conn.execute_batch(include_str!("../migrations/042_toko_logo.sql"));
+    ensure_column(&conn, "toko", "logo_path", "TEXT");
 
     crate::commands::hardware_cmd::ensure_hardware_table(&conn);
     eprintln!("DB_INIT: Success");

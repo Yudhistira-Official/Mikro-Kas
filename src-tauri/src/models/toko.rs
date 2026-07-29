@@ -6,6 +6,9 @@ pub struct Toko {
     pub nama_toko: String,
     pub qris_statis: Option<String>,
     pub qris_foto_path: Option<String>,
+    /// Path absolut logo perusahaan (tampil di login & identitas toko).
+    #[serde(default)]
+    pub logo_path: Option<String>,
     pub created_at: String,
     pub alamat: Option<String>,
     pub telepon: Option<String>,
@@ -20,6 +23,8 @@ pub struct TokoInput {
     pub nama_toko: String,
     pub qris_statis: Option<String>,
     pub qris_foto_path: Option<String>,
+    #[serde(default)]
+    pub logo_path: Option<String>,
     pub alamat: Option<String>,
     pub telepon: Option<String>,
     pub email: Option<String>,

@@ -38,6 +38,8 @@ pub fn run() {
             commands::toko_cmd::get_toko,
             commands::toko_cmd::save_toko,
             commands::toko_cmd::save_toko_foto,
+            commands::toko_cmd::save_toko_logo,
+            commands::toko_cmd::clear_toko_logo,
             // Kategori produk
             commands::kategori_cmd::list_kategori,
             commands::kategori_cmd::create_kategori,
