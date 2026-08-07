@@ -178,6 +178,7 @@ pub fn list_produk(
     if let Some(ref s) = search {
         ensure_produk_sku(&conn);
         param_idx += 1;
+        let p_contains = param_idx;
         // Substring match di mana saja: nama, sku utama, kata kunci, merek, kode_item, multi-SKU.
         sql.push_str(&format!(
             " AND (p.nama LIKE ?{0}
@@ -186,9 +187,15 @@ pub fn list_produk(
                OR COALESCE(p.merek, '') LIKE ?{0}
                OR COALESCE(p.kode_item, '') LIKE ?{0}
                OR EXISTS (SELECT 1 FROM produk_sku ps WHERE ps.produk_id = p.id AND ps.sku LIKE ?{0}))",
-            param_idx
+            p_contains
         ));
         param_values.push(Box::new(format!("%{}%", s.trim())));
+        // Ranking binds — exact match (rank 0) dan prefix match (rank 1) untuk ORDER BY.
+        // Sama dengan pola di list_produk_kasir agar urutan konsisten.
+        param_idx += 1;
+        param_values.push(Box::new(s.trim().to_string())); // exact param
+        param_idx += 1;
+        param_values.push(Box::new(format!("{}%", s.trim()))); // prefix param
     }
 
     if let Some(kid) = kategori_id {
@@ -224,7 +231,26 @@ pub fn list_produk(
     }
 
     let id_dir = if direction == "DESC" { "DESC" } else { "ASC" };
-    sql.push_str(&format!(" ORDER BY {} {}, p.id {}", sort_column, direction, id_dir));
+
+    // Rank search: exact (0) > prefix/awalan (1) > contains (2), lalu sort kolom.
+    // Identik dengan pola list_produk_kasir agar urutan konsisten di semua halaman.
+    // param exact = param_idx-1, param prefix = param_idx (di-push saat search block atas).
+    if search.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        let p_exact = param_idx - 1;
+        let p_prefix = param_idx;
+        sql.push_str(&format!(
+            " ORDER BY (CASE
+                WHEN lower(p.nama) = lower(?{0}) OR lower(COALESCE(p.sku,'')) = lower(?{0})
+                     OR EXISTS (SELECT 1 FROM produk_sku ps WHERE ps.produk_id = p.id AND lower(ps.sku) = lower(?{0})) THEN 0
+                WHEN p.nama LIKE ?{1} OR COALESCE(p.sku,'') LIKE ?{1}
+                     OR EXISTS (SELECT 1 FROM produk_sku ps WHERE ps.produk_id = p.id AND ps.sku LIKE ?{1}) THEN 1
+                ELSE 2
+              END) ASC, {2} {3}, p.id {4}",
+            p_exact, p_prefix, sort_column, direction, id_dir
+        ));
+    } else {
+        sql.push_str(&format!(" ORDER BY {} {}, p.id {}", sort_column, direction, id_dir));
+    }
 
     if let Some(l) = limit {
         param_idx += 1;

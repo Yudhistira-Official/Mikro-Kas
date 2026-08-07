@@ -50,6 +50,8 @@ const bytesToBase64 = (bytes) => {
 export default function Produk() {
   const { addToast } = useToast();
   const [produk, setProduk] = useState([]);
+  // Header stats dari backend (total DB, bukan length list paginated)
+  const [headerStats, setHeaderStats] = useState({ total: 0, stok_menipis: 0, nilai_modal: 0, total_kategori: 0 });
   const [kategori, setKategori] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -90,11 +92,23 @@ export default function Produk() {
     }
   };
 
+  const loadHeaderStats = useCallback(() => {
+    invoke("get_produk_stats")
+      .then((s) => setHeaderStats({
+        total: Number(s?.total || 0),
+        stok_menipis: Number(s?.stok_menipis || 0),
+        nilai_modal: Number(s?.nilai_modal || 0),
+        total_kategori: Number(s?.total_kategori || 0),
+      }))
+      .catch(() => {});
+  }, []);
+
   const loadProduk = useCallback(() => {
     const requestId = ++produkRequestRef.current;
     const initialLoad = produkRef.current.length === 0;
     if (initialLoad) setLoading(true);
     setProdukHasMore(true);
+    loadHeaderStats();
     invoke("list_produk", { search: search || null, kategoriId, onlyActive: false, limit: PAGE_SIZE, sortBy: SORT_FIELD[sortBy], sortOrder })
       .then((data) => {
         if (requestId !== produkRequestRef.current) return;
@@ -103,7 +117,7 @@ export default function Produk() {
       })
       .catch((error) => { if (requestId === produkRequestRef.current) console.error(error); })
       .finally(() => { if (requestId === produkRequestRef.current) setLoading(false); });
-  }, [search, kategoriId, sortBy, sortOrder]);
+  }, [search, kategoriId, sortBy, sortOrder, loadHeaderStats]);
 
   // Load more via cursor (only for default sort)
   const loadMore = useCallback(() => {
@@ -428,10 +442,10 @@ export default function Produk() {
         </>
       }
       stats={[
-        { label: "Total Produk", value: produk.length, icon: "inventory_2" },
-        { label: "Stok Menipis", value: lowStock.length, icon: "warning", tone: lowStock.length ? "var(--color-warning-amber)" : undefined },
-        { label: "Nilai Modal Stok", value: rupiah(nilaiStok), icon: "payments" },
-        { label: "Kategori", value: kategori.length, icon: "category" },
+        { label: "Total Produk", value: headerStats.total, icon: "inventory_2" },
+        { label: "Stok Menipis", value: headerStats.stok_menipis, icon: "warning", tone: headerStats.stok_menipis ? "var(--color-warning-amber)" : undefined },
+        { label: "Nilai Modal Stok", value: rupiah(headerStats.nilai_modal), icon: "payments" },
+        { label: "Kategori", value: headerStats.total_kategori || kategori.length, icon: "category" },
       ]}
     >
       <InfoNote icon="inventory">

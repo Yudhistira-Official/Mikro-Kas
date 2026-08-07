@@ -29,6 +29,7 @@ const waNumber = (telp) => {
 export default function Customer() {
   const { addToast } = useToast();
   const [list, setList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ total: 0, punya_limit: 0, punya_telepon: 0 });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showImportCSV, setShowImportCSV] = useState(false);
@@ -40,8 +41,18 @@ export default function Customer() {
   const PAGE_SIZE = 50;
   const [form, setForm] = useState({ nama: "", telepon: "", alamat: "", deskripsi_tambahan: "", limit_kredit: 0 });
 
+  const loadHeaderStats = () => {
+    invoke("get_customer_stats")
+      .then((s) => setHeaderStats({
+        total: Number(s?.total || 0),
+        punya_limit: Number(s?.punya_limit || 0),
+        punya_telepon: Number(s?.punya_telepon || 0),
+      }))
+      .catch(() => {});
+  };
+
   const load = (offset = 0, append = false, searchValue = query) => {
-    if (!append) setLoading(true);
+    if (!append) { setLoading(true); loadHeaderStats(); }
     invoke("list_customer", { search: searchValue || null, limit: PAGE_SIZE, offset })
       .then((data) => { setList((prev) => append ? [...prev, ...data] : data); setHasMore(data.length >= PAGE_SIZE); })
       .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
@@ -244,9 +255,9 @@ export default function Customer() {
         </>
       }
       stats={[
-        { label: "Total Pelanggan", value: list.length, icon: "group" },
-        { label: "Punya Limit Kredit", value: list.filter(c => Number(c.limit_kredit) > 0).length, icon: "credit_card" },
-        { label: "Punya Telepon", value: list.filter(c => c.telepon).length, icon: "phone" },
+        { label: "Total Pelanggan", value: headerStats.total, icon: "group" },
+        { label: "Punya Limit Kredit", value: headerStats.punya_limit, icon: "credit_card" },
+        { label: "Punya Telepon", value: headerStats.punya_telepon, icon: "phone" },
       ]}
     >
       <section className="sales-panel">

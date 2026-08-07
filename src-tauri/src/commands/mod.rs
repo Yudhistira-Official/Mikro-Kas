@@ -55,6 +55,7 @@ pub mod sales_cmd;
 pub mod serial_cmd;
 pub mod shift_cmd;
 /// Stock opname (stok fisik vs stok sistem)
+pub mod stats_cmd;
 pub mod stock_opname_cmd;
 pub mod supplier_cmd;
 pub mod toko_cmd;

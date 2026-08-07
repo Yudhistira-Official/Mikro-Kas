@@ -22,6 +22,7 @@ import { VirtualDataTable } from "../components/VirtualDataTable";
 export default function Pembelian() {
   const { addToast } = useToast();
   const [produk, setProduk] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ produk_aktif: 0, supplier: 0 });
   const [produkHasMore, setProdukHasMore] = useState(true);
   const [produkLoading, setProdukLoading] = useState(false);
   const [supplier, setSupplier] = useState([]);
@@ -46,6 +47,9 @@ export default function Pembelian() {
 
   const produkRequestRef = useRef(0);
   const load = async (append = false) => {
+    if (!append) {
+      invoke("get_pembelian_page_stats").then((s) => setHeaderStats({ produk_aktif: Number(s?.produk_aktif||0), supplier: Number(s?.supplier||0) })).catch(() => {});
+    }
     const requestId = ++produkRequestRef.current;
     if (!append) setLoading(true);
     else setProdukLoading(true);
@@ -175,8 +179,8 @@ export default function Pembelian() {
         </button>
       }
       stats={[
-        { label: "Produk Aktif", value: produk.length, icon: "inventory_2" },
-        { label: "Supplier", value: supplier.length, icon: "store" },
+        { label: "Produk Aktif", value: headerStats.produk_aktif, icon: "inventory_2" },
+        { label: "Supplier", value: headerStats.supplier, icon: "store" },
       ]}
     >
       <InfoNote icon="local_shipping">

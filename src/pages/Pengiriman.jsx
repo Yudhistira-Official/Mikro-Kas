@@ -9,6 +9,7 @@ import SearchSelect from "../components/SearchSelect";
 export default function Pengiriman() {
   const { addToast } = useToast();
   const [data, setData] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ total: 0, diproses: 0, dikirim: 0, diterima: 0 });
   const [hasMore, setHasMore] = useState(true);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -16,6 +17,12 @@ export default function Pengiriman() {
   const [form, setForm] = useState({ transaksi_id: "", alamat_kirim: "", kota: "", provinsi: "", kode_pos: "", ekspedisi: "", no_resi: "", catatan: "" });
 
   const load = async (offset = 0, append = false) => {
+    if (!append) invoke("get_pengiriman_stats").then((s) => setHeaderStats({
+      total: Number(s?.total||0),
+      diproses: Number(s?.diproses||0),
+      dikirim: Number(s?.dikirim||0),
+      diterima: Number(s?.diterima||0),
+    })).catch(() => {});
     if (!append) setLoading(true);
     try {
       const rows = await invoke("list_pengiriman", { limit: 50, offset });
@@ -107,10 +114,10 @@ export default function Pengiriman() {
         </>
       }
       stats={[
-        { label: "Total Pengiriman", value: data.length, icon: "local_shipping" },
-        { label: "Diproses", value: statusCount("diproses"), icon: "pending" },
-        { label: "Dikirim", value: statusCount("dikirim"), icon: "inventory_2" },
-        { label: "Diterima", value: statusCount("diterima"), icon: "task_alt" },
+        { label: "Total Pengiriman", value: headerStats.total, icon: "local_shipping" },
+        { label: "Diproses", value: headerStats.diproses, icon: "pending" },
+        { label: "Dikirim", value: headerStats.dikirim, icon: "inventory_2" },
+        { label: "Diterima", value: headerStats.diterima, icon: "task_alt" },
       ]}
     >
       <section className="sales-panel">

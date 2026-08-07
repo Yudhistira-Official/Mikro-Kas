@@ -1,4 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/**
+ * SearchSelect — dropdown autocomplete dengan keyboard navigation.
+ *
+ * Performance notes (low-end device optimization):
+ * - Dropdown list DIBATASI MAX_VISIBLE_OPTIONS item untuk mencegah ribuan DOM node
+ *   saat produkList besar. Filter tetap berjalan di semua options, tapi hanya
+ *   MAX_VISIBLE_OPTIONS pertama yang di-render ke DOM.
+ * - `filtered` di-memoize; hanya re-compute saat `options` reference ATAU `text` berubah.
+ *   Parent wajib memoize array options dengan useMemo agar cache tidak invalidate setiap render.
+ * - `pick` dan event handlers di-wrap useCallback agar tidak trigger re-render child.
+ *
+ * @param {string}   value       - Controlled value (option.value yang dipilih)
+ * @param {Function} onChange    - Callback (value) => void saat opsi dipilih
+ * @param {Array}    options     - Array { value, label } — wajib di-memoize oleh parent
+ * @param {string}   placeholder - Teks placeholder input
+ * @param {string}   className   - CSS class untuk input element
+ * @param {boolean}  required    - HTML required attribute
+ * @param {boolean}  disabled    - Disable seluruh komponen
+ * @param {object}   style       - Inline style untuk wrapper div
+ */
+
+/** Batas maksimum item yang di-render ke DOM sekaligus.
+ *  Mencegah freeze saat produkList > 500 item di perangkat low-end. */
+const MAX_VISIBLE_OPTIONS = 100;
 
 export default function SearchSelect({
   value = "",
@@ -12,6 +37,7 @@ export default function SearchSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(() => {
+    // Inisialisasi label dari value awal; kosong jika tidak ditemukan
     const found = options.find((o) => o.value === value);
     return found ? found.label : "";
   });
@@ -21,16 +47,30 @@ export default function SearchSelect({
   const listRef = useRef(null);
 
   const filtered = useMemo(() => {
+    // Filter + rank berdasarkan query; jika kosong tampilkan semua.
+    // Ranking: exact match(0) > starts-with(1) > contains(2) > no-match(3).
+    // Memo hanya invalid saat options reference atau text berubah —
+    // parent WAJIB pass options via useMemo agar cache tidak buang setiap re-render.
     const query = text.trim().toLowerCase();
     if (!query) return options;
     return options
       .map((option, index) => ({ option, index, label: String(option.label).toLowerCase() }))
+      .filter(({ label }) => label.includes(query)) // buang no-match sebelum sort
       .sort((a, b) => {
-        const rank = (label) => label === query ? 0 : label.startsWith(query) ? 1 : label.includes(query) ? 2 : 3;
+        const rank = (label) => label === query ? 0 : label.startsWith(query) ? 1 : 2;
         return rank(a.label) - rank(b.label) || a.index - b.index;
       })
       .map(({ option }) => option);
   }, [options, text]);
+
+  /**
+   * Slice filtered ke MAX_VISIBLE_OPTIONS untuk membatasi jumlah DOM node.
+   * Semua item tetap diproses filter di atas, tapi hanya sebagian kecil di-render.
+   */
+  const visibleOptions = useMemo(
+    () => filtered.slice(0, MAX_VISIBLE_OPTIONS),
+    [filtered]
+  );
 
   // Reset highlight ke elemen pertama saat hasil filter berubah
   useEffect(() => {
@@ -76,11 +116,17 @@ export default function SearchSelect({
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  const pick = (opt) => {
+  /**
+   * pick — pilih satu opsi, update text, tutup dropdown, panggil onChange.
+   * Wrapped useCallback agar referensi stabil dan tidak trigger re-render child.
+   *
+   * @param {{value: string, label: string}} opt - Opsi yang dipilih
+   */
+  const pick = useCallback((opt) => {
     onChange?.(opt.value);
     setText(opt.label);
     setOpen(false);
-  };
+  }, [onChange]);
 
   return (
     <div className="search-select" ref={rootRef} style={style}>
@@ -100,8 +146,9 @@ export default function SearchSelect({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              if (open && filtered.length > 0 && activeIdx >= 0 && activeIdx < filtered.length) {
-                pick(filtered[activeIdx]);
+              // Confirm selection from visible (capped) list, not full filtered list
+              if (open && visibleOptions.length > 0 && activeIdx >= 0 && activeIdx < visibleOptions.length) {
+                pick(visibleOptions[activeIdx]);
               }
               return;
             }
@@ -110,7 +157,8 @@ export default function SearchSelect({
               if (!open) {
                 setOpen(true);
               } else {
-                setActiveIdx((prev) => Math.min(prev + 1, filtered.length - 1));
+                // Bound to visibleOptions length, not full filtered, to match rendered DOM
+                setActiveIdx((prev) => Math.min(prev + 1, visibleOptions.length - 1));
               }
             }
             if (e.key === "ArrowUp") {
@@ -172,7 +220,9 @@ export default function SearchSelect({
       
       {open && (
         <div className="search-select__popup" ref={listRef} style={{ position: "fixed" }}>
-          {filtered.map((opt, idx) => (
+          {/* Render hanya MAX_VISIBLE_OPTIONS item pertama untuk mencegah DOM besar.
+              Ketik lebih spesifik untuk mempersempit hasil jika item tidak terlihat. */}
+          {visibleOptions.map((opt, idx) => (
             <button
               key={opt.value}
               type="button"
@@ -183,6 +233,20 @@ export default function SearchSelect({
               {opt.label}
             </button>
           ))}
+          {/* Tampilkan hint jika ada item tersembunyi karena cap MAX_VISIBLE_OPTIONS */}
+          {filtered.length > MAX_VISIBLE_OPTIONS && (
+            <div
+              style={{
+                padding: "6px 12px",
+                fontSize: "11px",
+                color: "var(--color-text-secondary)",
+                borderTop: "1px solid var(--color-border)",
+                textAlign: "center",
+              }}
+            >
+              {filtered.length - MAX_VISIBLE_OPTIONS} item lainnya — ketik untuk mempersempit
+            </div>
+          )}
         </div>
       )}
       

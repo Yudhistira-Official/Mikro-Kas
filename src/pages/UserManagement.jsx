@@ -1,7 +1,13 @@
 // ============================================================
 // UserManagement.jsx — CRUD user & role (PageKit).
 //
-// Commands: list_users, create_user, deactivate_user
+// Commands: list_users, create_user, update_user, deactivate_user,
+//           set_security_questions, get_security_questions_admin
+//
+// NOTE — Tauri 2 IPC arg naming:
+//   Rust snake_case params (e.g. user_id) are deserialized from
+//   camelCase JSON keys (e.g. userId) by the #[tauri::command] macro.
+//   Always send camelCase from JS to Tauri 2 commands.
 // ============================================================
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "../utils/ipc";
@@ -11,7 +17,34 @@ import {
   PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter,
 } from "../components/PageKit";
 
-/** Map role → tone StatusBadge. */
+/**
+ * Filters and normalizes security question entries from form state
+ * into the shape expected by Tauri commands (set_security_questions, create_user).
+ *
+ * Applies DRY principle — this exact filter+map pattern repeated in 2 places:
+ * 1. save() edit-mode branch (set_security_questions)
+ * 2. save() create-mode branch (create_user req.questions)
+ *
+ * @param {Array<{pertanyaan: string, jawaban: string}>} questions - Raw form state rows
+ * @returns {Array<{pertanyaan: string, jawaban: string}>} Only filled rows, both fields trimmed
+ */
+function buildFilledQuestions(questions) {
+  // Keep only rows where both pertanyaan and jawaban are non-empty after trim
+  return questions
+    .filter((q) => q.pertanyaan.trim() && q.jawaban.trim())
+    .map((q) => ({
+      pertanyaan: q.pertanyaan.trim(),
+      jawaban: q.jawaban.trim(),
+    }));
+}
+
+/**
+ * Maps role string to StatusBadge tone variant.
+ * admin/inventori → primary, supervisor → warning, kasir → success.
+ *
+ * @param {string} role - Role string from user record
+ * @returns {string} Tone name for StatusBadge component
+ */
 function roleTone(role) {
   if (role === "admin") return "primary";
   if (role === "supervisor") return "warning";
@@ -80,8 +113,9 @@ export default function UserManagement() {
     setErrors({});
     setEditMode(true);
     setEditUserId(user.id);
-    // Load security questions for this user
-    invoke("get_security_questions_admin", { user_id: user.id })
+    // Load security questions for this user.
+    // Tauri 2 deserializes Rust snake_case params (user_id) from camelCase (userId).
+    invoke("get_security_questions_admin", { userId: user.id })
       .then((qs) => {
         setSecurityQuestions((qs || []).map((q) => ({
           pertanyaan: q.pertanyaan,
@@ -127,27 +161,19 @@ export default function UserManagement() {
             password: form.password || null,
           },
         });
-        // Save security questions
-        const filledQuestions = securityQuestions
-          .filter((q) => q.pertanyaan.trim() && q.jawaban.trim())
-          .map((q) => ({
-            pertanyaan: q.pertanyaan.trim(),
-            jawaban: q.jawaban.trim(),
-          }));
+        // Build normalized question list and save via Tauri command.
+        // userId (camelCase) required — Tauri 2 maps Rust snake_case params to camelCase.
+        const filledQuestions = buildFilledQuestions(securityQuestions);
         await invoke("set_security_questions", {
-          user_id: editUserId,
+          userId: editUserId,
           questions: filledQuestions,
         });
         addToast("User berhasil diperbarui", "success");
         // Notify App.jsx to refresh currentUser (clears must_change_password banner)
         window.dispatchEvent(new CustomEvent("user-updated"));
       } else {
-        const questions = securityQuestions
-          .filter((q) => q.pertanyaan.trim() && q.jawaban.trim())
-          .map((q) => ({
-            pertanyaan: q.pertanyaan.trim(),
-            jawaban: q.jawaban.trim(),
-          }));
+        // Use shared helper to normalize questions — DRY, same logic as edit-mode path
+        const questions = buildFilledQuestions(securityQuestions);
         await invoke("create_user", {
           req: {
             username: form.username.trim(),

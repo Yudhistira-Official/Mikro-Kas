@@ -31,6 +31,7 @@ export default function Riwayat() {
   const [dari, setDari] = useState(today);
   const [sampai, setSampai] = useState(today);
   const [list, setList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ jumlah: 0, total_omzet: 0 });
   const [produk, setProduk] = useState([]);
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -41,19 +42,21 @@ export default function Riwayat() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sales, products, tokoData] = await Promise.all([
+      const [sales, products, tokoData, stats] = await Promise.all([
         invoke("list_transaksi", {
           tipe: "penjualan",
           dariTanggal: dari,
           sampaiTanggal: sampai,
           limit: 100,
         }),
-        invoke("list_produk", { onlyActive: true }),
+        invoke("list_produk", { onlyActive: true, limit: 50 }),
         invoke("get_toko").catch(() => null),
+        invoke("get_transaksi_penjualan_stats", { dari, sampai }).catch(() => null),
       ]);
       setList(sales);
       setProduk(products);
       setToko(tokoData);
+      if (stats) setHeaderStats({ jumlah: Number(stats.jumlah || 0), total_omzet: Number(stats.total_omzet || 0) });
     } catch (e) {
       addToast(`Gagal memuat riwayat: ${e}`, "error");
     } finally {
@@ -259,8 +262,8 @@ export default function Riwayat() {
       title="Riwayat Penjualan"
       description="Lihat dan edit penjualan maksimal 2 hari. Perubahan stok dihitung ulang atomik di backend."
       stats={[
-        { label: "Transaksi", value: filtered.length, icon: "receipt_long" },
-        { label: "Total Omzet", value: rupiah(totalNilai), icon: "payments", tone: "var(--color-income-green)" },
+        { label: "Transaksi", value: headerStats.jumlah, icon: "receipt_long" },
+        { label: "Total Omzet", value: rupiah(headerStats.total_omzet), icon: "payments", tone: "var(--color-income-green)" },
         { label: "Periode", value: `${dari} → ${sampai}`, icon: "calendar_month" },
       ]}
     >

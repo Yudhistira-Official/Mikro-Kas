@@ -10,6 +10,12 @@ import { VirtualDataTable } from "../components/VirtualDataTable";
 export default function SalesKomisi() {
   const { addToast } = useToast();
   const [sales, setSales] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ aktif: 0, total: 0 });
+    useEffect(() => {
+    invoke("get_sales_stats")
+      .then((s) => setHeaderStats({ aktif: Number(s?.aktif || 0), total: Number(s?.total || 0) }))
+      .catch(() => {});
+  }, []);
   const [komisi, setKomisi] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -32,12 +38,14 @@ export default function SalesKomisi() {
   const load = async () => {
     setLoading(true);
     try {
-      const [salesData, komisiData] = await Promise.all([
+      const [salesData, komisiData, stats] = await Promise.all([
         invoke("list_sales"),
         invoke("list_komisi_terutang", { sales_id: null, status: null }),
+        invoke("get_sales_stats").catch(() => null),
       ]);
       setSales(salesData || []);
       setKomisi(komisiData || []);
+      if (stats) setHeaderStats({ aktif: Number(stats.aktif || 0), total: Number(stats.total || 0) });
     } catch (error) {
       { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); };
     } finally {
@@ -199,7 +207,7 @@ export default function SalesKomisi() {
         <button className="btn-primary sales-page__add" onClick={() => openForm()}><span className="material-symbols-outlined">person_add</span>Tambah Sales</button>
       }
       stats={[
-        { label: "Sales Aktif", value: sales.length, icon: "groups" },
+        { label: "Sales Aktif", value: headerStats.aktif || sales.length, icon: "groups" },
         { label: "Komisi Terutang", value: rupiah(totalPending), icon: "pending_actions" },
         { label: "Komisi Terbayar", value: rupiah(totalPaid), icon: "payments" },
       ]}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
@@ -37,6 +37,25 @@ export default function HppManagement() {
   /** Daftar produk aktif untuk datalist */
   const [produkList, setProdukList] = useState([]);
   const [gudangList, setGudangList] = useState([]);
+
+  /**
+   * produkOptions — array {value, label} stabil untuk SearchSelect.
+   * Memoized agar referensi tidak berubah setiap render; SearchSelect
+   * hanya re-compute filter ketika produkList benar-benar berubah.
+   */
+  const produkOptions = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` (${p.sku})` : ""}` })),
+    [produkList]
+  );
+
+  /**
+   * gudangOptions — array {value, label} stabil untuk SearchSelect gudang.
+   * Kosong jika gudang tidak dipakai (optional field).
+   */
+  const gudangOptions = useMemo(
+    () => gudangList.map((g) => ({ value: String(g.id), label: g.nama })),
+    [gudangList]
+  );
 
   useEffect(() => {
     Promise.all([
@@ -144,7 +163,7 @@ export default function HppManagement() {
                 value={batch.produkId}
                 onChange={(value) => setBatch((p) => ({ ...p, produkId: value }))}
                 placeholder="Pilih produk"
-                options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))}
+                options={produkOptions}
                 required
               />
             </label>
@@ -154,7 +173,7 @@ export default function HppManagement() {
                 value={batch.gudangId}
                 onChange={(value) => setBatch((p) => ({ ...p, gudangId: value }))}
                 placeholder="Semua gudang"
-                options={gudangList.map((g) => ({ value: String(g.id), label: g.nama }))}
+                options={gudangOptions}
               />
             </label>
             <label>
@@ -200,7 +219,7 @@ export default function HppManagement() {
                 value={simForm.produkId}
                 onChange={(value) => setSimForm((p) => ({ ...p, produkId: value }))}
                 placeholder="Pilih produk"
-                options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))}
+                options={produkOptions}
                 required
               />
             </label>
@@ -210,7 +229,7 @@ export default function HppManagement() {
                 value={simForm.gudangId}
                 onChange={(value) => setSimForm((p) => ({ ...p, gudangId: value }))}
                 placeholder="Semua gudang"
-                options={gudangList.map((g) => ({ value: String(g.id), label: g.nama }))}
+                options={gudangOptions}
               />
             </label>
             <label>

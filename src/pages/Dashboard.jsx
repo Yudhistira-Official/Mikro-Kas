@@ -23,6 +23,53 @@ const ranges = [
 ];
 
 /**
+ * FORMULAS — static lookup: nama stat → { formula, icon }.
+ * Dipindah ke luar komponen agar tidak dibuat ulang setiap render.
+ * Sebelumnya di dalam component body → new object reference setiap render.
+ */
+const FORMULAS = {
+  "Penjualan Kotor": { formula: "Total seluruh penjualan (sebelum retur)", icon: "trending_up" },
+  "Penjualan Bersih": { formula: "Penjualan Kotor − Retur", icon: "payments" },
+  "Laba Kotor": { formula: "Total penjualan − Total modal (HPP)", icon: "savings" },
+  "Keuntungan Bersih": { formula: "Laba Kotor − Pengeluaran", icon: "account_balance" },
+  "Retur": { formula: "Total barang dikembalikan dalam periode ini", icon: "undo" },
+  "Pengeluaran": { formula: "Total pengeluaran kas (biaya operasional)", icon: "money_off" },
+  "Transaksi": { formula: "Jumlah transaksi dalam periode ini", icon: "receipt_long" },
+  "Rata-rata / TRX": { formula: "Penjualan Bersih ÷ Jumlah Transaksi", icon: "calculate" },
+  "Margin": { formula: "(Laba Kotor ÷ Penjualan Bersih) × 100%", icon: "pie_chart" },
+};
+
+/**
+ * MONTH_NAMES — nama bulan Indonesia, index 0–11.
+ * Statis — dipindah ke luar komponen agar tidak dibuat ulang setiap render.
+ */
+const MONTH_NAMES = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
+
+/**
+ * txTime — format timestamp transaksi ke string human-readable Indonesia.
+ * Dipindah ke luar komponen: pure function, tidak bergantung state.
+ * Sebelumnya di dalam komponen → referensi baru setiap render,
+ * membuat terlarisColumns/recentColumns useMemo selalu invalid.
+ *
+ * @param {string|null} t - Timestamp string (SQLite format atau ISO)
+ * @returns {string} Label waktu: "Hari ini, HH:mm" / "Kemarin, HH:mm" / "D Bulan"
+ */
+const txTime = (t) => {
+  const d = new Date(t?.replace(" ", "T") + (t?.includes("Z") ? "" : "Z"));
+  const nowd = new Date();
+  if (d.getDate() === nowd.getDate() && nowd - d < 86400000) {
+    return `Hari ini, ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  if (nowd - d < 172800000 && d.getDate() === nowd.getDate() - 1) {
+    return `Kemarin, ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+};
+
+/**
  * Dashboard: omzet, laba, chart harian, terlaris, transaksi terbaru.
  */
 export default function Dashboard() {
@@ -49,17 +96,7 @@ export default function Dashboard() {
   const [semuaProduk, setSemuaProduk] = useState([]);
   // Popup formula stat
   const [formulaStat, setFormulaStat] = useState(null);
-  const FORMULAS = {
-    "Penjualan Kotor": { formula: "Total seluruh penjualan (sebelum retur)", icon: "trending_up" },
-    "Penjualan Bersih": { formula: "Penjualan Kotor − Retur", icon: "payments" },
-    "Laba Kotor": { formula: "Total penjualan − Total modal (HPP)", icon: "savings" },
-    "Keuntungan Bersih": { formula: "Laba Kotor − Pengeluaran", icon: "account_balance" },
-    "Retur": { formula: "Total barang dikembalikan dalam periode ini", icon: "undo" },
-    "Pengeluaran": { formula: "Total pengeluaran kas (biaya operasional)", icon: "money_off" },
-    "Transaksi": { formula: "Jumlah transaksi dalam periode ini", icon: "receipt_long" },
-    "Rata-rata / TRX": { formula: "Penjualan Bersih ÷ Jumlah Transaksi", icon: "calculate" },
-    "Margin": { formula: "(Laba Kotor ÷ Penjualan Bersih) × 100%", icon: "pie_chart" },
-  };
+  // FORMULAS, MONTH_NAMES, txTime moved to module scope — not recreated every render
   const closeFormula = useCallback(() => setFormulaStat(null), []);
 
   const range = useMemo(() => {
@@ -71,6 +108,10 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+
+    // Stage 1: Load critical KPI data first — ringkasan, chart, terlaris, recent, toko.
+    // list_produk dipisah ke Stage 2 agar tidak memblokir render awal dashboard.
+    // Pada perangkat low-end, 9 request simultan = thread I/O jenuh + long task di main thread.
     Promise.all([
       invoke("get_ringkasan", range),
       invoke("get_penjualan_harian", range),
@@ -80,10 +121,10 @@ export default function Dashboard() {
       invoke("get_total_retur", range),
       invoke("get_recent_transactions", { limit: 5 }),
       invoke("get_toko"),
-      invoke("list_produk", { onlyActive: true }),
     ])
-      .then(([r, h, t, c, p, ret, rec, tk, allProd]) => {
+      .then(([r, h, t, c, p, ret, rec, tk]) => {
         if (cancelled) return;
+        // Render critical stats immediately — user sees data before produk list loads
         setRingkasan(r);
         setHarian(h);
         setTerlaris(t);
@@ -92,21 +133,34 @@ export default function Dashboard() {
         setRetur(ret);
         setRecent(rec || []);
         setToko(tk);
-        // Merge all products with sales data for "Semua Produk" / "Kurang Laris" tabs
-        const salesMap = {};
-        (t || []).forEach((sale) => { salesMap[sale.nama.toLowerCase()] = sale; });
-        const merged = (allProd || []).map((p) => {
-          const key = p.nama.toLowerCase();
-          return salesMap[key]
-            ? { nama: p.nama, total_qty: salesMap[key].total_qty, total_revenue: salesMap[key].total_revenue }
-            : { nama: p.nama, total_qty: 0, total_revenue: 0 };
-        });
-        setSemuaProduk(merged);
+        setLoading(false);
+
+        // Stage 2: Load full product list after critical data is shown.
+        // Deferred so the main thread is free to paint first render before
+        // processing potentially large produk array + merge computation.
+        invoke("list_produk", { onlyActive: true })
+          .then((allProd) => {
+            if (cancelled) return;
+            // Merge produk list with terlaris sales data for "Semua" / "Kurang Laris" tabs.
+            // Build salesMap by nama (lowercase) for O(n) lookup instead of O(n²) nested find.
+            const salesMap = {};
+            (t || []).forEach((sale) => { salesMap[sale.nama.toLowerCase()] = sale; });
+            const merged = (allProd || []).map((prod) => {
+              const key = prod.nama.toLowerCase();
+              return salesMap[key]
+                ? { nama: prod.nama, total_qty: salesMap[key].total_qty, total_revenue: salesMap[key].total_revenue }
+                : { nama: prod.nama, total_qty: 0, total_revenue: 0 };
+            });
+            setSemuaProduk(merged);
+          })
+          .catch(console.error);
       })
-      .catch(console.error)
-      .finally(() => {
+      .catch((err) => {
+        console.error(err);
+        // Only clear loading on error so spinner doesn't hang
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
@@ -164,7 +218,13 @@ export default function Dashboard() {
     return `${d.getDate()} ${monthNames[d.getMonth()]}`;
   };
 
-  const terlarisColumns = [
+  /**
+   * terlarisColumns — kolom VirtualDataTable untuk tab produk terlaris/semua/kurang laris.
+   * useMemo: array ini berisi fungsi render inline yang akan membuat referensi baru
+   * setiap render jika tidak dimemo — menyebabkan VirtualDataTable re-render meskipun
+   * data rows tidak berubah. Tidak ada deps karena hanya pakai konstanta modul-scope.
+   */
+  const terlarisColumns = useMemo(() => [
     {
       key: "nama",
       label: "Produk",
@@ -193,9 +253,15 @@ export default function Dashboard() {
       align: "right",
       render: (p) => (p.stok != null ? String(p.stok) : "—"),
     },
-  ];
+  ], []);
 
-  const recentColumns = [
+  /**
+   * recentColumns — kolom VirtualDataTable untuk transaksi terbaru.
+   * useMemo: sama seperti terlarisColumns — render functions stabil agar
+   * VirtualDataTable tidak re-render saat formulaStat/rangeIdx/loading berubah.
+   * txTime dari module scope — referensi stabil, aman sebagai dep (tidak masuk dep array).
+   */
+  const recentColumns = useMemo(() => [
     {
       key: "tipe",
       label: "Jenis",
@@ -218,7 +284,7 @@ export default function Dashboard() {
         </strong>
       ),
     },
-  ];
+  ], []);
 
   const filteredProduk = useMemo(() => {
     let rows;

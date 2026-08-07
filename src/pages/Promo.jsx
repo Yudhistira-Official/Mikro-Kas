@@ -10,7 +10,7 @@
 // cepat, tanpa migrasi database.
 // Design ref: KasGo — Loyalty & Promo.
 // ============================================================
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { useToast } from "../hooks/useToast";
 import { invoke } from "../utils/ipc";
 import SearchSelect from "../components/SearchSelect";
@@ -81,6 +81,27 @@ export default function Promo() {
   const [tmRule, setTmRule] = useState(readPromoTebusMurahRule);
   const [produkList, setProdukList] = useState([]);
 
+  /**
+   * produkOptions — array {value, label} stabil untuk SearchSelect.
+   * Memoized agar referensi tidak berubah saat minRule/bxgyRule/tmRule
+   * state berubah (yang terjadi setiap interaksi form) — SearchSelect
+   * filter memo tidak perlu re-compute karena produkList belum berubah.
+   */
+  const produkOptions = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: p.nama })),
+    [produkList]
+  );
+
+  /**
+   * produkOptionsWithPrice — variant label dengan harga jual untuk BxGY dan TM dropdowns.
+   * Dipisah dari produkOptions karena format label berbeda (nama — Rp harga).
+   * Memoized dengan dependensi produkList agar tidak re-compute saat rule state berubah.
+   */
+  const produkOptionsWithPrice = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: `${p.nama} — ${rupiah(p.harga_jual)}` })),
+    [produkList]
+  );
+
   // Load produk untuk dropdown BxGY
   useEffect(() => {
     invoke("list_produk", { onlyActive: true })
@@ -115,7 +136,18 @@ export default function Promo() {
   };
 
   // --- Beli X Gratis Y ---
-  const selectedProduk = produkList.find((p) => p.id === bxgyRule.produkId);
+  /**
+   * selectedProduk — produk terpilih untuk BxGY rule.
+   * Memoized: .find() pada produkList besar jalan setiap render saat
+   * state lain (minRule, tmRule) berubah; memo hanya re-compute saat
+   * produkList atau bxgyRule.produkId berubah.
+   *
+   * @returns {object|undefined} Produk record atau undefined
+   */
+  const selectedProduk = useMemo(
+    () => produkList.find((p) => p.id === bxgyRule.produkId),
+    [produkList, bxgyRule.produkId]
+  );
   const bxgyMin = Number(bxgyRule.minBelanja || 0);
 
   const saveBxgy = () => {
@@ -138,7 +170,17 @@ export default function Promo() {
   };
 
   // --- Tebus Murah ---
-  const selectedTmProduk = produkList.find((p) => p.id === tmRule.produkId);
+  /**
+   * selectedTmProduk — produk terpilih untuk Tebus Murah rule.
+   * Memoized identik dengan selectedProduk BxGY — menghindari .find()
+   * berulang setiap render saat minRule/bxgyRule state berubah.
+   *
+   * @returns {object|undefined} Produk record atau undefined
+   */
+  const selectedTmProduk = useMemo(
+    () => produkList.find((p) => p.id === tmRule.produkId),
+    [produkList, tmRule.produkId]
+  );
   const tmMin = Number(tmRule.minBelanja || 0);
   const tmHarga = Number(tmRule.hargaTebus || 0);
 
@@ -262,12 +304,13 @@ export default function Promo() {
             className="input-field"
             value={bxgyRule.produkId || ""}
             onChange={(value) => {
+              // Find nama from produkList using the selected id for denormalized storage in rule
               const id = value ? Number(value) : null;
               const nama = produkList.find((p) => p.id === id)?.nama || "";
               setBxgyRule((p) => ({ ...p, produkId: id, produkNama: nama }));
             }}
             placeholder="Pilih produk..."
-            options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama} — ${rupiah(p.harga_jual)}` }))}
+            options={produkOptionsWithPrice}
           />
         </div>
 
@@ -332,7 +375,7 @@ export default function Promo() {
               setTmRule((p) => ({ ...p, produkId: id, produkNama: nama }));
             }}
             placeholder="Pilih produk..."
-            options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama} — ${rupiah(p.harga_jual)}` }))}
+            options={produkOptionsWithPrice}
           />
         </div>
 

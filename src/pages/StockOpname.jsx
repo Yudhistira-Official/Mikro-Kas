@@ -16,14 +16,16 @@ export default function StockOpname() {
   /* ── Tab Baru ── */
   const [form, setForm] = useState({ namaToko: "", tanggal: "", petugas: "", penanggungJawab: "", catatan: "" });
   const [produkList, setProdukList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ total_opname: 0, total_produk_aktif: 0 });
   const [fisikMap, setFisikMap] = useState({});
 
   const loadAwal = useCallback(async () => {
     try {
       setLoading(true);
-      const [toko, produk] = await Promise.all([
+      const [toko, produk, stats] = await Promise.all([
         invoke("get_toko"),
-        invoke("list_produk", { onlyActive: true }),
+        invoke("list_produk", { onlyActive: true, limit: 200 }),
+        invoke("get_stock_opname_stats").catch(() => null),
       ]);
       const today = new Date().toISOString().slice(0, 10);
       setForm({
@@ -33,7 +35,13 @@ export default function StockOpname() {
         penanggungJawab: "",
         catatan: "",
       });
-      setProdukList(produk);
+      setProdukList(produk || []);
+      if (stats) {
+        setHeaderStats({
+          total_opname: Number(stats.total_opname || 0),
+          total_produk_aktif: Number(stats.total_produk_aktif || 0),
+        });
+      }
     } catch (e) { addToast(`Gagal muat data: ${e}`, "error"); }
     finally { setLoading(false); }
   }, [addToast]);
@@ -106,21 +114,54 @@ export default function StockOpname() {
     (p) => `${p.nama || ""} ${p.sku || ""}`
   );
 
+  // width eksplisit agar header + baris 1 baris (tidak menumpuk)
   const columnsBaru = [
-    { key: "no", label: "No", width: 40, align: "center",
+    {
+      key: "no",
+      label: "No",
+      width: "48px",
+      align: "center",
       render: (_, idx) => idx + 1,
     },
-    { key: "kode", label: "Kode Barang", render: (p) => <span className="text-label-md">{p.sku || "—"}</span> },
-    { key: "nama", label: "Nama Barang", render: (p) => <b>{p.nama}</b> },
-    { key: "satuan", label: "Satuan", render: (p) => p.satuan || "—", align: "center" },
-    { key: "sistem", label: "Stok Sistem", align: "center", render: (p) => p.stok },
-    { key: "fisik", label: "Stok Fisik", align: "center",
+    {
+      key: "kode",
+      label: "Kode",
+      width: "minmax(96px, 0.85fr)",
+      render: (p) => <span className="text-label-md">{p.sku || "—"}</span>,
+    },
+    {
+      key: "nama",
+      label: "Nama Barang",
+      width: "minmax(140px, 2fr)",
+      render: (p) => (
+        <b style={{ overflowWrap: "anywhere", lineHeight: 1.35, display: "block" }}>{p.nama}</b>
+      ),
+    },
+    {
+      key: "satuan",
+      label: "Satuan",
+      width: "72px",
+      align: "center",
+      render: (p) => p.satuan || "—",
+    },
+    {
+      key: "sistem",
+      label: "Sistem",
+      width: "72px",
+      align: "center",
+      render: (p) => p.stok,
+    },
+    {
+      key: "fisik",
+      label: "Fisik",
+      width: "96px",
+      align: "center",
       render: (p) => {
         const val = fisikMap[p.id]?.fisik !== undefined ? fisikMap[p.id].fisik : "";
         return (
           <input
             className="input-field"
-            style={{ width: 72, textAlign: "center" }}
+            style={{ width: "100%", maxWidth: 80, textAlign: "center", minHeight: 34, padding: "4px 6px" }}
             type="number"
             inputMode="numeric"
             value={val}
@@ -130,7 +171,11 @@ export default function StockOpname() {
         );
       },
     },
-    { key: "selisih", label: "Selisih", align: "center",
+    {
+      key: "selisih",
+      label: "Selisih",
+      width: "88px",
+      align: "center",
       render: (p) => {
         const val = fisikMap[p.id]?.fisik;
         if (val === undefined || val === null || val === "") return "—";
@@ -138,17 +183,25 @@ export default function StockOpname() {
         if (!Number.isFinite(fisik)) return "—";
         const selisih = fisik - p.stok;
         if (selisih === 0) return <StatusBadge label="0" tone="neutral" />;
-        return <StatusBadge label={`${selisih > 0 ? "+" : ""}${selisih}`} tone={selisih > 0 ? "success" : "danger"} />;
+        return (
+          <StatusBadge
+            label={`${selisih > 0 ? "+" : ""}${selisih}`}
+            tone={selisih > 0 ? "success" : "danger"}
+          />
+        );
       },
     },
-    { key: "keterangan", label: "Keterangan",
+    {
+      key: "keterangan",
+      label: "Ket.",
+      width: "minmax(110px, 1.1fr)",
       render: (p) => (
         <input
           className="input-field"
-          style={{ width: 140 }}
+          style={{ width: "100%", minHeight: 34, padding: "4px 8px", fontSize: 12 }}
           value={fisikMap[p.id]?.keterangan || ""}
           onChange={(e) => updateKeterangan(p.id, e.target.value)}
-          placeholder="Rusak/hilang..."
+          placeholder="Opsional"
         />
       ),
     },
@@ -222,6 +275,10 @@ export default function StockOpname() {
       eyebrow="STOK"
       title="Stock Opname"
       description="Buat opname stok fisik baru atau lihat riwayat opname yang sudah tersimpan."
+      stats={[
+        { label: "Produk Aktif", value: headerStats.total_produk_aktif, icon: "inventory_2" },
+        { label: "Riwayat Opname", value: headerStats.total_opname, icon: "history" },
+      ]}
     >
       <div className="tab-bar" style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid var(--color-border)" }}>
         {["baru", "riwayat"].map((t) => (

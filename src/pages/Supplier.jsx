@@ -30,6 +30,7 @@ const waNumber = (telp) => {
 export default function Supplier() {
   const { addToast } = useToast();
   const [list, setList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ total: 0, punya_telepon: 0, punya_alamat: 0 });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -49,8 +50,18 @@ export default function Supplier() {
   // -------------------------------------------------------
   // LOAD — ambil semua supplier dari backend.
   // -------------------------------------------------------
+  const loadHeaderStats = () => {
+    invoke("get_supplier_stats")
+      .then((s) => setHeaderStats({
+        total: Number(s?.total || 0),
+        punya_telepon: Number(s?.punya_telepon || 0),
+        punya_alamat: Number(s?.punya_alamat || 0),
+      }))
+      .catch(() => {});
+  };
+
   const load = (offset = 0, append = false, searchValue = query) => {
-    if (!append) setLoading(true);
+    if (!append) { setLoading(true); loadHeaderStats(); }
     invoke("list_supplier", { search: searchValue || null, limit: PAGE_SIZE, offset })
       .then((data) => { setList((prev) => append ? [...prev, ...data] : data); setHasMore(data.length >= PAGE_SIZE); })
       .catch(e => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); })
@@ -298,9 +309,9 @@ export default function Supplier() {
         </>
       }
       stats={[
-        { label: "Total Supplier", value: list.length, icon: "local_shipping" },
-        { label: "Punya Telepon", value: list.filter(s => s.telepon).length, icon: "phone" },
-        { label: "Punya Alamat", value: list.filter(s => s.alamat).length, icon: "location_on" },
+        { label: "Total Supplier", value: headerStats.total, icon: "local_shipping" },
+        { label: "Punya Telepon", value: headerStats.punya_telepon, icon: "phone" },
+        { label: "Punya Alamat", value: headerStats.punya_alamat, icon: "location_on" },
       ]}
     >
       <section className="sales-panel">

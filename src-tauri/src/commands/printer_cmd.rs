@@ -546,7 +546,8 @@ pub fn print_struk(
             Err(e) => last_err = e,
         }
     }
-    Err(format!("Printer tidak ditemukan / tidak bisa ditulis. {last_err} Atur path di Profil Perusahaan atau pasang printer ESC/POS USB."))
+    // Pesan error ringkas — detail teknis disembunyikan agar tidak membingungkan kasir
+    Err("Cetak Struk Gagal. Coba periksa printer dahulu".to_string())
 }
 
 #[cfg(test)]

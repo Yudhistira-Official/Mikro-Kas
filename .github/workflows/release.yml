@@ -1,0 +1,101 @@
+name: Release MikroKas
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-13
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libudev-dev \
+            libusb-1.0-0-dev \
+            pkg-config
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "MikroKas ${{ github.ref_name }} - Desktop"
+          releaseBody: |
+            ## MikroKas v4.0.0 — Desktop
+
+            ### Fitur Baru
+            - **Cek Harga**: Price checker full-page tanpa login — akses dari tombol FAB di halaman Login
+            - **Auto Update**: Mekanisme update otomatis via GitHub Releases
+
+            ### Peningkatan Performa
+            - `SearchSelect`: cap dropdown 100 item, stable useCallback
+            - `Dashboard`: IPC staggered, VirtualDataTable overscan dikurangi, konstanta dipindah ke module scope
+            - `Perakitan`, `HppManagement`, `MultiHarga`, `SerialManagement`, `Promo`: semua options via useMemo
+
+            ### Perbaikan Bug
+            - `UserManagement`: fix `user_id` → `userId` untuk set/get security questions
+            - Pesan error printer diperbaiki menjadi lebih informatif
+            - Search produk: 3-tier ranking (exact → prefix → contains)
+
+            ### PDF Laporan
+            - Kolom No ditambahkan
+            - Alignment Rupiah diperbaiki (Rp + desimal terpisah)
+            - Word wrap custom per karakter
+            - Urutan baris mengikuti sort UI
+
+            ### Lain-lain
+            - Versi bumped ke 4.0.0
+            - Ukuran window default: 1280×800 (min 900×600)
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

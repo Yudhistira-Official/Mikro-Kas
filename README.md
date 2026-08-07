@@ -8,6 +8,16 @@
 
 MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite, Rust, dan SQLite lokal. Aplikasi dirancang offline-first: transaksi, produk, stok, pelanggan, supplier, pembayaran, komisi, dan laporan berjalan menggunakan database lokal tanpa server eksternal.
 
+## Download
+
+**Latest Release: v4.0.0**
+
+- [Windows Installer (.msi)](https://github.com/Yudhistira-Official/Mikro-Kas/releases/latest)
+- [Linux AppImage](https://github.com/Yudhistira-Official/Mikro-Kas/releases/latest)
+- [macOS Universal (.dmg)](https://github.com/Yudhistira-Official/Mikro-Kas/releases/latest)
+
+**Auto-update**: Aplikasi akan otomatis memeriksa dan mengunduh update terbaru dari GitHub Releases.
+
 ## Stack
 
 - Frontend: React + Vite

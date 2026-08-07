@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, DataTable, FormModal, InfoNote, StatusBadge, useSearchFilter, rupiah } from "../components/PageKit";
@@ -19,8 +19,31 @@ export default function Perakitan() {
   const [saving, setSaving] = useState(false);
   const [produkList, setProdukList] = useState([]);
 
-  /** Muat semua BOM dari backend */
-  const load = async () => {
+  /**
+   * produkOptions — shape {value, label} stabil untuk SearchSelect.
+   * useMemo memastikan referensi array tidak berubah saat re-render biasa;
+   * SearchSelect.filtered memo cache tetap valid dan tidak jalan ulang.
+   */
+  const produkOptions = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` (${p.sku})` : ""}` })),
+    [produkList]
+  );
+
+  /**
+   * gudangOptions — shape {value, label} stabil untuk SearchSelect gudang.
+   * Nilai kosong "" untuk opsi "semua gudang".
+   */
+  const gudangOptions = useMemo(
+    () => [{ value: "", label: "Semua gudang" }, ...gudangList.map((g) => ({ value: String(g.id), label: g.nama }))],
+    [gudangList]
+  );
+
+  /**
+   * load — muat ulang seluruh daftar BOM dari backend.
+   * Wrapped useCallback agar referensi stabil dan tidak menyebabkan
+   * useEffect dependency loop saat dipakai sebagai dep.
+   */
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await invoke("list_bom");
@@ -30,7 +53,7 @@ export default function Perakitan() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
   useEffect(() => {
     load();
@@ -107,7 +130,7 @@ export default function Perakitan() {
                  value={form.produk_id}
                  onChange={(value) => setForm({ ...form, produk_id: value })}
                  placeholder="Pilih produk"
-                 options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))}
+                 options={produkOptions}
                  required
                />
             </label>
@@ -121,14 +144,14 @@ export default function Perakitan() {
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <span className="text-label-md">Gudang / Outlet Sumber Stok</span>
-              <SearchSelect value={form.gudang_id} onChange={(value) => setForm({ ...form, gudang_id: value })} placeholder="Pilih gudang" options={gudangList.map((g) => ({ value: String(g.id), label: g.nama }))} />
+              <SearchSelect value={form.gudang_id} onChange={(value) => setForm({ ...form, gudang_id: value })} placeholder="Pilih gudang" options={gudangOptions} />
             </label>
             <fieldset style={{ border: "1px solid var(--color-surface-border)", borderRadius: 10, padding: "12px 10px" }}>
               <legend style={{ fontSize: 13, fontWeight: 600 }}>Detail Bahan Baku</legend>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {form.items.map((item, idx) => (
                   <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 32px", gap: 6, alignItems: "center" }}>
-                    <SearchSelect value={item.komponen_id} onChange={(v) => setItem(idx, "komponen_id", v)} placeholder="Pilih bahan baku" options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))} />
+                    <SearchSelect value={item.komponen_id} onChange={(v) => setItem(idx, "komponen_id", v)} placeholder="Pilih bahan baku" options={produkOptions} />
                     <input className="input-field" type="number" min="0" step="any" placeholder="Qty" value={item.qty_per_unit} onChange={(e) => setItem(idx, "qty_per_unit", e.target.value)} style={{ fontSize: 12 }} />
                     <input className="input-field" placeholder="Unit" value={item.satuan} onChange={(e) => setItem(idx, "satuan", e.target.value)} style={{ fontSize: 12 }} />
                     <button type="button" className="btn-icon" onClick={() => removeItem(idx)} title="Hapus"><span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--color-error)" }}>remove_circle</span></button>

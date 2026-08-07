@@ -22,22 +22,29 @@ export default function Konsinyasi() {
   const [form, setForm] = useState(emptyMasuk);
   const [suppliers, setSuppliers] = useState([]);
   const [produkList, setProdukList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ masuk: 0, keluar: 0, total_item: 0 });
   const [detailId, setDetailId] = useState(null);
   const [detailItems, setDetailItems] = useState([]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [m, k, s, p] = await Promise.all([
+      const [m, k, s, p, stats] = await Promise.all([
         invoke("list_konsinyasi_masuk"),
         invoke("list_konsinyasi_keluar"),
         invoke("list_supplier").catch(() => []),
-        invoke("list_produk", { onlyActive: true }).catch(() => []),
+        invoke("list_produk", { onlyActive: true, limit: 50 }).catch(() => []),
+        invoke("get_konsinyasi_stats").catch(() => null),
       ]);
       setMasuk(Array.isArray(m) ? m : []);
       setKeluar(Array.isArray(k) ? k : []);
       setSuppliers(Array.isArray(s) ? s : []);
       setProdukList(Array.isArray(p) ? p : []);
+      if (stats) setHeaderStats({
+        masuk: Number(stats.masuk || 0),
+        keluar: Number(stats.keluar || 0),
+        total_item: Number(stats.total_item || 0),
+      });
     } catch (e) { { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }; }
     finally { setLoading(false); }
   };
@@ -177,9 +184,9 @@ export default function Konsinyasi() {
         </div>
       }
       stats={[
-        { label: "Konsinyasi Masuk", value: masuk.length, icon: "move_to_inbox" },
-        { label: "Konsinyasi Keluar", value: keluar.length, icon: "outbox" },
-        { label: "Total Item", value: totalItems.toLocaleString("id-ID"), icon: "inventory_2" },
+        { label: "Konsinyasi Masuk", value: headerStats.masuk, icon: "move_to_inbox" },
+        { label: "Konsinyasi Keluar", value: headerStats.keluar, icon: "outbox" },
+        { label: "Total Item", value: Number(headerStats.total_item || 0).toLocaleString("id-ID"), icon: "inventory_2" },
       ]}
     >
       <section className="sales-panel">

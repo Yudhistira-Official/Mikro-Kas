@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, InfoNote } from "../components/PageKit";
@@ -15,6 +15,16 @@ export default function MultiHarga() {
   const [result, setResult] = useState(null);
   const [resultType, setResultType] = useState("");
   const [produkList, setProdukList] = useState([]);
+
+  /**
+   * produkOptions — array {value, label} stabil untuk SearchSelect.
+   * Memoized agar referensi tidak berubah setiap render; mencegah
+   * SearchSelect filter memo invalid setiap kali komponen re-render.
+   */
+  const produkOptions = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` (${p.sku})` : ""}` })),
+    [produkList]
+  );
 
   useEffect(() => {
     invoke("list_produk", { onlyActive: true }).then((data) => setProdukList(data || [])).catch(() => {});
@@ -78,7 +88,7 @@ export default function MultiHarga() {
                 value={hargaForm.produkId}
                 onChange={(value) => setHargaForm({ produkId: value })}
                 placeholder="Pilih produk"
-                options={produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }))}
+                options={produkOptions}
                 required
               />
             </label>

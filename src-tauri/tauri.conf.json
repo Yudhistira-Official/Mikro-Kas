@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "mikrokas",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "identifier": "com.yudhis.mikrokas",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "mikrokas",
-        "width": 800,
-        "height": 600
+        "title": "MikroKas",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600
       }
     ],
     "security": {
@@ -31,5 +33,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Yudhistira-Official/Mikro-Kas/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

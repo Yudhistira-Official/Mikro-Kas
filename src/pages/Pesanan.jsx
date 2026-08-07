@@ -30,6 +30,7 @@ export default function Pesanan() {
   const { addToast } = useToast();
   const [tab, setTab] = useState("open");
   const [rows, setRows] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ jumlah: 0, total: 0, total_dp: 0, total_sisa: 0 });
   const [hasMore, setHasMore] = useState(true);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,10 +52,17 @@ export default function Pesanan() {
   const load = useCallback(async (offset = 0, append = false) => {
     if (!append) setLoading(true);
     try {
-      const [pesanan, customer] = await Promise.all([
+      const [pesanan, customer, stats] = await Promise.all([
         invoke("list_pesanan_customer", { status: tab, limit: PAGE_SIZE, offset }),
         append ? Promise.resolve(null) : invoke("list_customer"),
+        append ? Promise.resolve(null) : invoke("get_pesanan_stats", { status: tab }).catch(() => null),
       ]);
+      if (stats) setHeaderStats({
+        jumlah: Number(stats.jumlah || 0),
+        total: Number(stats.total || 0),
+        total_dp: Number(stats.total_dp || 0),
+        total_sisa: Number(stats.total_sisa || 0),
+      });
       setRows((current) => append ? [...current, ...pesanan] : pesanan);
       setHasMore(pesanan.length === PAGE_SIZE);
       if (customer) setCustomers(customer);
@@ -286,10 +294,10 @@ export default function Pesanan() {
         </button>
       }
       stats={[
-        { label: "Nilai Pesanan", value: rupiah(summary.total), icon: "shopping_bag" },
-        { label: "Total DP", value: rupiah(summary.dp), icon: "payments", tone: "var(--color-income-green)" },
-        { label: "Sisa Bayar", value: rupiah(summary.sisa), icon: "account_balance_wallet", tone: "var(--color-warning-amber)" },
-        { label: "Jumlah", value: filtered.length, icon: "list_alt" },
+        { label: "Nilai Pesanan", value: rupiah(headerStats.total), icon: "shopping_bag" },
+        { label: "Total DP", value: rupiah(headerStats.total_dp), icon: "payments", tone: "var(--color-income-green)" },
+        { label: "Sisa Bayar", value: rupiah(headerStats.total_sisa), icon: "account_balance_wallet", tone: "var(--color-warning-amber)" },
+        { label: "Jumlah", value: headerStats.jumlah, icon: "list_alt" },
       ]}
     >
       <InfoNote icon="info">

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "../utils/ipc";
+import CekHarga from "./CekHarga";
 
 /**
  * Login — UX dari Stitch: logo perusahaan, form padat operator, show/hide password,
@@ -16,6 +17,7 @@ export default function Login({ onLogin }) {
   const [toko, setToko] = useState(null);
 
   const [showForgot, setShowForgot] = useState(false);
+  const [showCekHarga, setShowCekHarga] = useState(false);
   const [forgotStep, setForgotStep] = useState(1);
   const [forgotUsername, setForgotUsername] = useState("");
   const [forgotQuestions, setForgotQuestions] = useState([]);
@@ -110,6 +112,11 @@ export default function Login({ onLogin }) {
 
   const logoSrc = toko?.logo_path ? convertFileSrc(toko.logo_path) : null;
   const storeName = (toko?.nama_toko || "").trim();
+
+  // ── Conditional render: CekHarga full-page or Login screen ──
+  if (showCekHarga) {
+    return <CekHarga onBack={() => setShowCekHarga(false)} />;
+  }
 
   return (
     <main className="login-page">
@@ -307,6 +314,41 @@ export default function Login({ onLogin }) {
           </div>
         </div>
       )}
+      {/* ── FAB tombol cek harga — pojok kanan bawah ── */}
+      <button
+        type="button"
+        aria-label="Cek Harga Produk"
+        onClick={() => setShowCekHarga(true)}
+        title="Cek Harga"
+        style={{
+          position: "fixed",
+          bottom: "24px",
+          right: "24px",
+          width: "56px",
+          height: "56px",
+          borderRadius: "50%",
+          background: "var(--color-primary)",
+          color: "#ffffff",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 4px 16px rgba(59,130,246,0.45), 0 2px 6px rgba(0,0,0,0.15)",
+          zIndex: 9990,
+          transition: "transform 0.15s, box-shadow 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = "scale(1.1)";
+          e.currentTarget.style.boxShadow = "0 6px 22px rgba(59,130,246,0.55), 0 3px 8px rgba(0,0,0,0.18)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = "scale(1)";
+          e.currentTarget.style.boxShadow = "0 4px 16px rgba(59,130,246,0.45), 0 2px 6px rgba(0,0,0,0.15)";
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: "26px" }}>point_of_sale</span>
+      </button>
     </main>
   );
 }

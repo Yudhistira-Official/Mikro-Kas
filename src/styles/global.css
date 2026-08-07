@@ -1626,7 +1626,14 @@ select optgroup {
 .sales-search input { all: unset; flex: 1; font-size: 13px; color: var(--color-text-primary); }
 .sales-search input::placeholder { color: var(--color-text-secondary); opacity: 0.6; }
 .sales-table-wrap { overflow: visible; }
-.sales-table-wrap--virtual { overflow-x: auto; }
+.sales-table-wrap--virtual { overflow: auto; }
+/* VirtualDataTable (div-grid) — garis pemisah hanya antar baris */
+.vdt-table { width: 100%; min-width: 640px; font-size: 13px; }
+.vdt-head { min-width: 100%; }
+.vdt-row:hover { background: var(--color-surface-container-low) !important; }
+.vdt-th, .vdt-td { box-sizing: border-box; }
+.vdt-td { border: none !important; }
+/* Legacy table virtual (jika masih ada) */
 .sales-table--virtual { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .sales-table--virtual thead { position: sticky; top: 0; z-index: 2; background: var(--color-surface-container-low); }
 .sales-table--virtual tbody { min-width: 100%; }
@@ -1636,12 +1643,12 @@ select optgroup {
   word-break: break-word;
   white-space: normal;
   line-height: 1.35;
-  border-bottom: 1px solid var(--color-surface-border);
+  border-bottom: none;
   box-sizing: border-box;
 }
-.sales-table--virtual tr {
+.sales-table--virtual tbody tr {
   border-bottom: 1px solid var(--color-surface-border);
-  background: var(--color-surface);
+  background: var(--color-surface-bright, #fff);
 }
 .sales-table--virtual tbody tr:hover td { background: var(--color-surface-container-low); }
 .sales-table { width: 100%; border-collapse: collapse; font-size: 13px; }

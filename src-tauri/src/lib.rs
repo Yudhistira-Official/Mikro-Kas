@@ -19,6 +19,7 @@ pub fn run() {
         .plugin(pdf_plugin::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Fallback jika app_data_dir gagal (misal Android environment blm siap)
             let app_dir = app
@@ -276,6 +277,18 @@ pub fn run() {
             commands::stock_opname_cmd::list_stock_opname,
             commands::stock_opname_cmd::get_stock_opname,
             commands::stock_opname_cmd::export_stock_opname_docx,
+            // Page header stats (full DB counts, not paginated length)
+            commands::stats_cmd::get_produk_stats,
+            commands::stats_cmd::get_customer_stats,
+            commands::stats_cmd::get_supplier_stats,
+            commands::stats_cmd::get_sales_stats,
+            commands::stats_cmd::get_gudang_stats,
+            commands::stats_cmd::get_transaksi_penjualan_stats,
+            commands::stats_cmd::get_pesanan_stats,
+            commands::stats_cmd::get_pengiriman_stats,
+            commands::stats_cmd::get_stock_opname_stats,
+            commands::stats_cmd::get_pembelian_page_stats,
+            commands::stats_cmd::get_konsinyasi_stats,
             // Factory reset command (admin only)
             commands::factory_reset_cmd::factory_reset,
         ])

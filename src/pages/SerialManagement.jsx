@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "../utils/ipc";
 import { useToast } from "../hooks/useToast";
 import { PageShell, DataPanel, StatusBadge } from "../components/PageKit";
@@ -22,14 +22,47 @@ export default function SerialManagement() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  /**
+   * produkOptions — shape {value, label} stabil untuk SearchSelect.
+   * Memoized agar SearchSelect tidak re-compute filter saat re-render
+   * yang tidak mengubah produkList (e.g. serialNumber/items state change).
+   */
+  const produkOptions = useMemo(
+    () => produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` (${p.sku})` : ""}` })),
+    [produkList]
+  );
+
+  /**
+   * selectedProduct — produk yang sedang dipilih untuk registrasi serial.
+   * Memoized karena .find() pada array besar berjalan setiap render;
+   * hanya re-compute saat produkId atau produkList berubah.
+   *
+   * @returns {object|undefined} Produk record atau undefined
+   */
+  const selectedProduct = useMemo(
+    () => produkList.find((p) => String(p.id) === String(produkId)),
+    [produkList, produkId]
+  );
+
+  /**
+   * historyProduct — produk yang dipilih untuk melihat riwayat serial.
+   * Sama seperti selectedProduct — memoized untuk menghindari .find()
+   * berulang di setiap render saat state lain (checking, saving, dll) berubah.
+   *
+   * @returns {object|undefined} Produk record atau undefined
+   */
+  const historyProduct = useMemo(
+    () => produkList.find((p) => String(p.id) === String(historyProdukId)),
+    [produkList, historyProdukId]
+  );
+
+  // Load semua produk aktif saat mount — satu kali saja.
+  // addToast di deps agar eslint tidak komplain, tapi addToast stabil (dari useToast).
   useEffect(() => {
     invoke("list_produk", { onlyActive: true })
       .then((data) => setProdukList(data || []))
       .catch((e) => { const _m=String(e); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); });
   }, [addToast]);
-
-  const selectedProduct = produkList.find((p) => String(p.id) === String(produkId));
-  const historyProduct = produkList.find((p) => String(p.id) === String(historyProdukId));
 
   const checkSerial = async () => {
     const value = serialNumber.trim();
@@ -106,7 +139,7 @@ export default function SerialManagement() {
 
   const readyCount = history.filter((s) => s.status === "ready").length;
   const soldCount = history.filter((s) => s.status === "terjual").length;
-  const productOptions = produkList.map((p) => ({ value: String(p.id), label: `${p.nama}${p.sku ? ` — ${p.sku}` : ""}` }));
+  // produkOptions defined via useMemo above — do NOT redefine here (would defeat memoization)
   const currentTime = new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
 
   return (
@@ -151,7 +184,7 @@ export default function SerialManagement() {
         <div className="sales-panel__toolbar" style={{ alignItems: "flex-end" }}>
           <label className="input-label" style={{ flex: "1 1 240px" }}>
             Produk
-            <SearchSelect value={produkId} onChange={setProdukId} options={productOptions} placeholder="Pilih produk..." />
+            <SearchSelect value={produkId} onChange={setProdukId} options={produkOptions} placeholder="Pilih produk..." />
           </label>
           <label className="input-label" style={{ flex: "1 1 260px" }}>
             Scan / Input Nomor Seri (SN / IMEI)
@@ -191,7 +224,7 @@ export default function SerialManagement() {
       </section>
 
       <DataPanel
-        toolbarExtra={<label className="input-label" style={{ minWidth: 260 }}>Lihat Riwayat Produk <SearchSelect value={historyProdukId} onChange={loadHistory} options={productOptions} placeholder="Pilih produk..." /></label>}
+        toolbarExtra={<label className="input-label" style={{ minWidth: 260 }}>Lihat Riwayat Produk <SearchSelect value={historyProdukId} onChange={loadHistory} options={produkOptions} placeholder="Pilih produk..." /></label>}
         loading={historyLoading}
         isEmpty={!historyLoading && historyProdukId && history.length === 0}
         emptyIcon="history"

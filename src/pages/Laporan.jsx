@@ -283,7 +283,54 @@ export default function Laporan() {
       const pageHeight = doc.internal.pageSize.getHeight();
       const tableWidth = pageWidth - margin * 2;
       const bottomLimit = pageHeight - 18;
-      const col = { nama: margin + 3, qty: margin + 72, metode: margin + 96, modal: margin + 133, total: margin + tableWidth - 3 };
+      // Kolom PDF — A4: 210mm, margin 14mm kiri+kanan → tableWidth ~182mm
+      // Layout: No(8mm) | Nama(50mm) | [gap] | Qty | Metode | Modal | Total
+      // Setiap kolom uang punya 2 sub-kolom tetap: "Rp" (kiri, fixed x) + angka (kanan, right-align)
+      // Dengan demikian semua "Rp" sejajar vertikal, dan semua angka rata kanan kolom
+      const RIGHT_START = margin + 75;
+      const COL_STEP    = 29;
+      // total right edge = 193mm, reserve 24mm untuk angka → total_rp = 169
+      // modal right edge = RIGHT_START + COL_STEP*2 = 133, reserve 24mm → modal_rp = 109
+      const NUM_RESERVE = 24; // mm cukup untuk "99.999.999,00" pada font 7.8pt
+      const col = {
+        no:         margin + 3,
+        nama:       margin + 11,
+        qty:        RIGHT_START,
+        metode:     RIGHT_START + COL_STEP * 0 + 4,
+        modal:      RIGHT_START + COL_STEP * 2,
+        modal_rp:   RIGHT_START + COL_STEP * 2 - NUM_RESERVE,
+        total:      margin + tableWidth - 3,
+        total_rp:   margin + tableWidth - 3 - NUM_RESERVE,
+      };
+
+      /**
+       * wrapText — potong teks jadi array baris dengan batas maksimum karakter per baris.
+       * Tidak pakai splitTextToSize (berbasis mm, tidak reliable antar font/size).
+       * Char-based: tiap baris max maxChars karakter, potong di spasi terdekat agar
+       * tidak memotong di tengah kata.
+       *
+       * @param {string} text     - Teks asli
+       * @param {number} maxChars - Maksimum karakter per baris (default 30)
+       * @returns {string[]}      - Array baris teks
+       */
+      const wrapText = (text, maxChars = 30) => {
+        if (!text) return [""];
+        // Jika teks pendek, kembalikan langsung tanpa looping
+        if (text.length <= maxChars) return [text];
+        const lines = [];
+        let remaining = text.trim();
+        while (remaining.length > maxChars) {
+          // Cari spasi terakhir sebelum maxChars untuk potong di kata
+          let cutAt = remaining.lastIndexOf(" ", maxChars);
+          // Tidak ada spasi → paksa potong di maxChars (nama tanpa spasi)
+          if (cutAt <= 0) cutAt = maxChars;
+          lines.push(remaining.slice(0, cutAt).trim());
+          remaining = remaining.slice(cutAt).trim();
+        }
+        if (remaining.length > 0) lines.push(remaining);
+        return lines;
+      };
+
       let y = 18;
 
       const setFont = (size, style = "normal", color = "#1f2937") => {
@@ -311,11 +358,50 @@ export default function Laporan() {
         y += 6;
       };
 
+      /**
+       * rupiahStr — format nilai rupiah jadi string dengan suffix ",00".
+       * Khusus untuk konteks string (drawTwoColTable, metodeRows array).
+       * Hasil: "Rp 1.234.567,00"
+       *
+       * @param {number} value - Nilai numerik
+       * @returns {string} String terformat dengan ,00
+       */
+      const rupiahStr = (value) =>
+        `Rp ${Math.floor(Number(value || 0)).toLocaleString("id-ID")},00`;
+
+      /**
+       * rupiahPdf — render harga di PDF dengan alignment ketat:
+       *   - "Rp" SELALU di rpX (fixed per kolom) → vertikal sejajar
+       *   - angka+",00" right-aligned ke rightEdge → rata kanan kolom
+       *   - desimal sejajar otomatis karena ",00" lebar tetap
+       *
+       * @param {number} value      - Nilai numerik
+       * @param {number} rpX        - X tetap untuk label "Rp" (SAMA setiap baris)
+       * @param {number} rightEdge  - X kanan kolom untuk right-align angka
+       * @param {number} yPos       - Y posisi
+       * @param {string} [color]    - Warna opsional
+       */
+      const rupiahPdf = (value, rpX, rightEdge, yPos, color) => {
+        if (color) doc.setTextColor(color);
+        const intStr = Math.floor(Number(value || 0)).toLocaleString("id-ID");
+        // Angka + ",00" digabung → right-align ke rightEdge → rata kanan + desimal sejajar
+        doc.text(`${intStr},00`, rightEdge, yPos, { align: "right" });
+        // "Rp" di posisi tetap per kolom → vertikal sejajar semua baris
+        doc.text("Rp", rpX, yPos);
+        if (color) doc.setTextColor("#334155");
+      };
+
+      /**
+       * drawTableHeader — render baris header tabel produk.
+       * Dipanggil di awal halaman dan saat addPage (withTable=true).
+       */
       const drawTableHeader = () => {
         doc.setFillColor("#e2e8f0");
         doc.setDrawColor("#cbd5e1");
         doc.rect(margin, y, tableWidth, 9, "FD");
         setFont(7.8, "bold", "#334155");
+        // Kolom No di kiri — 8mm, semua kolom lain digeser kanan
+        doc.text("No", col.no, y + 6);
         doc.text("Nama Produk", col.nama, y + 6);
         doc.text("Jumlah", col.qty, y + 6, { align: "right" });
         doc.text("Metode", col.metode, y + 6);
@@ -354,19 +440,27 @@ export default function Laporan() {
       drawSectionTitle(`Rincian Penjualan ${dari} s.d. ${sampai}`);
       drawTableHeader();
 
-      barisProduk.forEach((row, index) => {
-        const productLines = doc.splitTextToSize(row.produk_nama, 66);
-        const rowHeight = Math.max(10, productLines.length * 4 + 5);
+      // PDF menggunakan sortedPenjualan agar urutan PDF sesuai urutan tabel di layar
+      sortedPenjualan.forEach((row, index) => {
+        const productLines = wrapText(row.produk_nama, 30);
+        // rowHeight = lines × line pitch + top/bottom padding.
+        // Line pitch 5mm untuk font 7.8pt — cukup aman, tidak hardcode jsPDF internal.
+        const LINE_PITCH = 5;
+        const ROW_PAD = 4;
+        const rowHeight = Math.max(11, productLines.length * LINE_PITCH + ROW_PAD);
         addPageIfNeeded(rowHeight, true);
         doc.setFillColor(index % 2 === 0 ? "#ffffff" : "#f8fafc");
         doc.setDrawColor("#e2e8f0");
         doc.rect(margin, y, tableWidth, rowHeight, "FD");
         setFont(7.8, "normal", "#334155");
+        // Nomor urut item di kolom No (1-based)
+        doc.text(String(index + 1), col.no, y + 6);
         doc.text(productLines, col.nama, y + 6);
         doc.text(`${Number(row.total_qty || 0).toLocaleString("id-ID")} terjual`, col.qty, y + 6, { align: "right" });
         doc.text(labelPembayaran(row.metode_bayar), col.metode, y + 6);
-        doc.text(rupiah(row.total_modal), col.modal, y + 6, { align: "right" });
-        doc.text(rupiah(row.total_harga), col.total, y + 6, { align: "right" });
+        // rupiahPdf: Rp sejajar, angka decimal-aligned, suffix .00
+        rupiahPdf(row.total_modal, col.modal_rp, col.modal, y + 6);
+        rupiahPdf(row.total_harga, col.total_rp, col.total, y + 6);
         y += rowHeight;
       });
 
@@ -379,17 +473,17 @@ export default function Laporan() {
       doc.text("Total Penjualan", col.nama, y + 6.5);
       doc.text(`${totalQty.toLocaleString("id-ID")} terjual`, col.qty, y + 6.5, { align: "right" });
       doc.text("—", col.metode, y + 6.5);
-      doc.text(rupiah(totalModal), col.modal, y + 6.5, { align: "right" });
-      doc.text(rupiah(totalHarga), col.total, y + 6.5, { align: "right" });
+      rupiahPdf(totalModal, col.modal_rp, col.modal, y + 6.5, "#166534");
+      rupiahPdf(totalHarga, col.total_rp, col.total, y + 6.5, "#166534");
       y += 10;
 
       addPageIfNeeded(40);
       y += 10;
       drawSectionTitle("Ringkasan Keuangan");
       drawTwoColTable([
-        ["Total Penjualan", rupiah(totalHarga)],
-        ["Total Modal", rupiah(totalModal)],
-        ["Keuntungan", rupiah(totalHarga - totalModal)],
+        ["Total Penjualan", rupiahStr(totalHarga)],
+        ["Total Modal", rupiahStr(totalModal)],
+        ["Keuntungan", rupiahStr(totalHarga - totalModal)],
       ], true);
 
       addPageIfNeeded(32);
@@ -400,8 +494,8 @@ export default function Laporan() {
         const metode = labelPembayaran(row.metode_bayar);
         metodeMap.set(metode, (metodeMap.get(metode) || 0) + Number(row.total_harga || 0));
       });
-      const metodeRows = Array.from(metodeMap.entries()).map(([metode, total]) => [metode, rupiah(total)]);
-      metodeRows.push(["Total", rupiah(totalHarga)]);
+      const metodeRows = Array.from(metodeMap.entries()).map(([metode, total]) => [metode, rupiahStr(total)]);
+      metodeRows.push(["Total", rupiahStr(totalHarga)]);
       drawTwoColTable(metodeRows, true);
 
       const pageCount = doc.internal.getNumberOfPages();
@@ -541,18 +635,19 @@ export default function Laporan() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "720px" }}>
               <thead><tr style={{ background: "var(--color-surface-container-high)", textAlign: "left" }}>
-                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "produk_nama")}>Nama Produk{sortIcon("produk_nama")}</th>
+                <th style={{ padding: "10px", borderRadius: "8px 0 0 0", width: "40px", textAlign: "center" }}>No</th>
+                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "produk_nama")}>Nama Produk{sortIcon("produk_nama")}</th>
                 <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "total_qty")}>Jumlah{sortIcon("total_qty")}</th>
-                <th style={{ padding: "10px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "metode_bayar")}>Metode Pembayaran{sortIcon("metode_bayar")}</th>
-                <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "total_modal")}>Harga Awal{sortIcon("total_modal")}</th>
+                <th style={{ padding: "10px 14px", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "metode_bayar")}>Metode Pembayaran{sortIcon("metode_bayar")}</th>
+                <th style={{ padding: "10px 15px", textAlign: "right", cursor: "pointer", userSelect: "none" }} onClick={() => handleSortLaporan("penjualan", "total_modal")}>Harga Awal{sortIcon("total_modal")}</th>
                 <th style={{ padding: "10px", textAlign: "right", cursor: "pointer", userSelect: "none", borderRadius: "0 8px 0 0" }} onClick={() => handleSortLaporan("penjualan", "total_harga")}>Total{sortIcon("total_harga")}</th>
               </tr></thead>
               <tbody>
-                {loading ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center" }}>Memuat data...</td></tr> : barisProduk.length === 0 ? (
-                  <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Tidak ada data penjualan untuk periode ini.</td></tr>
+                {loading ? <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center" }}>Memuat data...</td></tr> : barisProduk.length === 0 ? (
+                  <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#999" }}>Tidak ada data penjualan untuk periode ini.</td></tr>
                 ) : (<>
-                  {sortedPenjualan.map((row, i) => <tr key={i} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", fontWeight: 500 }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_qty} terjual</td><td style={{ padding: "10px" }}>{labelPembayaran(row.metode_bayar)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_modal)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>{rupiah(row.total_harga)}</td></tr>)}
-                  <tr style={{ background: "#dcfce7", color: "#166534", fontWeight: 700 }}><td style={{ padding: "10px" }}>Total Penjualan</td><td style={{ padding: "10px", textAlign: "right" }}>{totalQty} terjual</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalModal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalHarga)}</td></tr>
+                  {sortedPenjualan.map((row, i) => <tr key={i} style={{ borderBottom: "1px solid var(--color-outline-variant)", background: i % 2 === 0 ? "transparent" : "var(--color-surface-container)" }}><td style={{ padding: "10px", textAlign: "center", color: "var(--color-text-secondary)", fontSize: "12px", width: "40px" }}>{i + 1}</td><td style={{ padding: "10px", fontWeight: 500 }}>{row.produk_nama}</td><td style={{ padding: "10px", textAlign: "right" }}>{row.total_qty} terjual</td><td style={{ padding: "10px" }}>{labelPembayaran(row.metode_bayar)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(row.total_modal)}</td><td style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>{rupiah(row.total_harga)}</td></tr>)}
+                  <tr style={{ background: "#dcfce7", color: "#166534", fontWeight: 700 }}><td style={{ padding: "10px" }}></td><td style={{ padding: "10px" }}>Total Penjualan</td><td style={{ padding: "10px", textAlign: "right" }}>{totalQty} terjual</td><td style={{ padding: "10px" }}>—</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalModal)}</td><td style={{ padding: "10px", textAlign: "right" }}>{rupiah(totalHarga)}</td></tr>
                 </>)}
               </tbody>
             </table>

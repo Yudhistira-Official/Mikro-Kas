@@ -20,6 +20,7 @@ const jenisLabel = (value) => JENIS_GUDANG.find((item) => item.value === value)?
 export default function Gudang() {
   const { addToast } = useToast();
   const [list, setList] = useState([]);
+  const [headerStats, setHeaderStats] = useState({ total: 0, default_count: 0, punya_alamat: 0 });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -29,7 +30,9 @@ export default function Gudang() {
 
   const load = async () => {
     setLoading(true);
-    try { setList(await invoke("list_gudang")); }
+    try { setList(await invoke("list_gudang"));
+      const s = await invoke("get_gudang_stats").catch(() => null);
+      if (s) setHeaderStats({ total: Number(s.total||0), default_count: Number(s.default_count||0), punya_alamat: Number(s.punya_alamat||0) }); }
     catch (error) { const _m=String(error); if(!_m.includes("no such table")&&!_m.includes("no such column")) addToast(_m,"error"); }
     finally { setLoading(false); }
   };
@@ -135,9 +138,9 @@ export default function Gudang() {
         </button>
       }
       stats={[
-        { label: "Total Gudang", value: list.length, icon: "warehouse" },
-        { label: "Gudang Default", value: list.filter((g) => g.is_default).length, icon: "home_work" },
-        { label: "Dengan Alamat", value: list.filter((g) => g.alamat).length, icon: "location_on" },
+        { label: "Total Gudang", value: headerStats.total, icon: "warehouse" },
+        { label: "Gudang Default", value: headerStats.default_count, icon: "home_work" },
+        { label: "Dengan Alamat", value: headerStats.punya_alamat, icon: "location_on" },
       ]}
     >
       <DataPanel

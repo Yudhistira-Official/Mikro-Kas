@@ -1210,9 +1210,7 @@ function PrintConfirmDialog({ onYes, onNo }) {
         <h2 style={{ margin: "0 0 8px", fontSize: 16, color: "var(--color-text-primary)" }}>
           Cetak struk?
         </h2>
-        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--color-text-secondary)" }}>
-          Ya = cetak (gagal membatalkan transaksi). Tidak = simpan tanpa cetak.
-        </p>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--color-text-secondary)" }}></p>
         <div style={{ display: "flex", gap: 10 }}>
           <button
             ref={yesRef}
