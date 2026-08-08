@@ -39,6 +39,7 @@
       "endpoints": [
         "https://github.com/Yudhistira-Official/Mikro-Kas/releases/latest/download/latest.json"
       ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCNDg1QTNDOEM4RTZGN0YKUldSL2I0Nk1QRnBJMjU0c0NZSk9pWG1xQjM0TENYMnI0WlRIbFgwc3dCU1RVbjBsQXhSaDJhSlgK",
       "dialog": true,
       "windows": {
         "installMode": "passive"

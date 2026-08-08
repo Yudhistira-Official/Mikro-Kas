@@ -18,6 +18,55 @@ MikroKas adalah aplikasi kasir dan pembukuan UMKM berbasis Tauri v2, React, Vite
 
 **Auto-update**: Aplikasi akan otomatis memeriksa dan mengunduh update terbaru dari GitHub Releases.
 
+## Troubleshooting
+
+### Linux AppImage tidak jalan
+
+**Gejala**: Double-click AppImage tidak membuka aplikasi, atau error "FUSE not found"
+
+**Penyebab**: Ubuntu 22.04+ dan distro modern tidak bundle `libfuse2` default.
+
+**Solusi**:
+
+1. **Install FUSE** (rekomendasi):
+   ```bash
+   sudo apt install libfuse2
+   ```
+
+2. **Atau extract manual** (tanpa FUSE):
+   ```bash
+   chmod +x mikrokas_4.0.0_amd64.AppImage
+   ./mikrokas_4.0.0_amd64.AppImage --appimage-extract-and-run
+   ```
+
+3. **Atau gunakan DEB/RPM** (native package):
+   - DEB: `sudo dpkg -i mikrokas_4.0.0_amd64.deb`
+   - RPM: `sudo rpm -i mikrokas-4.0.0-1.x86_64.rpm`
+
+### Windows EXE diblokir SmartScreen
+
+**Gejala**: "Windows protected your PC" saat jalankan installer EXE/MSI
+
+**Penyebab**: Binary unsigned (belum code-signing certificate)
+
+**Solusi**:
+
+1. Klik **"More info"** → **"Run anyway"**
+2. Atau bypass via properties:
+   - Right-click file → **Properties** → centang **Unblock** → **Apply**
+3. **Aman**: build dari source publik GitHub, workflow open, SHA256 verified
+
+### macOS "App is damaged"
+
+**Gejala**: "mikrokas.app is damaged and can't be opened"
+
+**Penyebab**: Gatekeeper block unsigned app
+
+**Solusi**:
+```bash
+xattr -cr /Applications/mikrokas.app
+```
+
 ## Stack
 
 - Frontend: React + Vite
