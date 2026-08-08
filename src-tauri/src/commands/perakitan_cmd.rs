@@ -40,6 +40,7 @@ pub struct BomItem {
 
 /// Header perakitan produksi.
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct Perakitan {
     pub id: i64,
     pub nomor: String,

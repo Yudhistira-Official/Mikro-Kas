@@ -10,6 +10,7 @@ use tauri::State;
 
 /// Batch stok masuk untuk tracking HPP.
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct StokBatch {
     pub id: i64,
     pub produk_id: i64,

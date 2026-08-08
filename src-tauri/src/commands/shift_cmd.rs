@@ -688,7 +688,7 @@ fn has_persisted_pecahan(row_count: usize) -> bool {
     row_count > 0
 }
 
-fn persisted_keys(rows: &[CashCountRow]) -> Vec<(i64, bool)> {
+fn _persisted_keys(rows: &[CashCountRow]) -> Vec<(i64, bool)> {
     rows.iter().map(|row| (row.denom, row.is_koin)).collect()
 }
 
@@ -705,31 +705,31 @@ fn validate_rows(rows: &[CashCountRow]) -> Result<(), String> {
     }
     Ok(())
 }
-fn total_awal(rows: &[(i64, i64, i64)]) -> Result<i64, String> {
+fn _total_awal(rows: &[(i64, i64, i64)]) -> Result<i64, String> {
     rows.iter().try_fold(0_i64, |sum, (d, q, _)| {
         d.checked_mul(*q)
             .and_then(|v| sum.checked_add(v))
             .ok_or_else(|| "Cash count total overflow".to_string())
     })
 }
-fn total_akhir(rows: &[(i64, i64, i64)]) -> Result<i64, String> {
+fn _total_akhir(rows: &[(i64, i64, i64)]) -> Result<i64, String> {
     rows.iter().try_fold(0_i64, |sum, (d, _, q)| {
         d.checked_mul(*q)
             .and_then(|v| sum.checked_add(v))
             .ok_or_else(|| "Cash count total overflow".to_string())
     })
 }
-fn pendapatan_aktual(total_akhir: i64, total_awal: i64) -> Result<i64, String> {
+fn _pendapatan_aktual(total_akhir: i64, total_awal: i64) -> Result<i64, String> {
     total_akhir
         .checked_sub(total_awal)
         .ok_or_else(|| "Cash income overflow".to_string())
 }
-fn variance(actual: i64, pos: i64) -> Result<i64, String> {
+fn _variance(actual: i64, pos: i64) -> Result<i64, String> {
     actual
         .checked_sub(pos)
         .ok_or_else(|| "Cash variance overflow".to_string())
 }
-fn validate_qty(value: f64) -> Result<i64, String> {
+fn _validate_qty(value: f64) -> Result<i64, String> {
     if !value.is_finite() || value < 0.0 || value >= 9_223_372_036_854_775_808.0 {
         return Err("Quantity must be a finite non-negative i64".to_string());
     }

@@ -462,7 +462,7 @@ pub fn get_produk(state: State<DbState>, id: i64) -> Result<Produk, String> {
     crate::db::ensure_column(&conn, "produk", "tipe_item", "TEXT DEFAULT 'BARANG'");
     crate::db::ensure_column(&conn, "produk", "rak", "TEXT");
     crate::db::ensure_column(&conn, "produk", "kode_item", "TEXT");
-    let mut produk = conn
+    let produk = conn
         .query_row(
             &format!("{} WHERE p.id = ?1", PRODUK_SELECT),
             params![id],
@@ -517,7 +517,7 @@ pub fn create_produk(state: State<DbState>, input: ProdukInput) -> Result<Produk
 
 /// Ambil produk by id + attach multi-SKU.
 fn get_produk_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Produk, String> {
-    let mut produk = conn
+    let produk = conn
         .query_row(
             &format!("{} WHERE p.id = ?1", PRODUK_SELECT),
             params![id],

@@ -16,12 +16,12 @@ fn lebar_kertas(conn: &rusqlite::Connection) -> usize {
     if raw <= 40 { 32 } else { 48 }
 }
 
-fn pad_right(s: &str, w: usize) -> String {
+fn _pad_right(s: &str, w: usize) -> String {
     let clean: String = s.chars().take(w).collect();
     format!("{:<width$}", clean, width = w)
 }
 
-fn pad_left(s: &str, w: usize) -> String {
+fn _pad_left(s: &str, w: usize) -> String {
     let clean: String = s.chars().take(w).collect();
     format!("{:>width$}", clean, width = w)
 }
@@ -97,7 +97,7 @@ fn format_no_struk(transaksi_id: i64, role: &str, prefix: &str) -> String {
     format!("{:05}/{}/{}", transaksi_id, role_code(role), p)
 }
 
-pub fn receipt_labels(w: usize) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+pub fn _receipt_labels(w: usize) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
     if w < 36 {
         ("B", "Qty", "Plg", "Kmb", "Cs")
     } else if w < 44 {
@@ -371,9 +371,9 @@ pub fn build_escpos_payload(text: &str) -> Vec<u8> {
     data.extend_from_slice(b"\x1B\x74\x00"); // ESC t 0 code page default
     data.extend_from_slice(b"\x1B\x61\x00"); // left align default
 
-    let mut in_center = false;
-    let mut in_right = false;
-    let mut in_left = false;
+    let mut _in_center = false;
+    let mut _in_right = false;
+    let mut _in_left = false;
     let mut pos = 0;
     let chars: Vec<char> = text.chars().collect();
 
@@ -382,9 +382,9 @@ pub fn build_escpos_payload(text: &str) -> Vec<u8> {
             let remaining: String = chars[pos..].iter().collect();
             if remaining.starts_with("<center>") {
                 data.extend_from_slice(b"\x1B\x61\x01"); // ESC a 1 center
-                in_center = true;
-                in_right = false;
-                in_left = false;
+                _in_center = true;
+                _in_right = false;
+                _in_left = false;
                 pos += 8;
                 continue;
             }
@@ -394,9 +394,9 @@ pub fn build_escpos_payload(text: &str) -> Vec<u8> {
             }
             if remaining.starts_with("<right>") {
                 data.extend_from_slice(b"\x1B\x61\x02"); // ESC a 2 right
-                in_right = true;
-                in_center = false;
-                in_left = false;
+                _in_right = true;
+                _in_center = false;
+                _in_left = false;
                 pos += 7;
                 continue;
             }
@@ -406,9 +406,9 @@ pub fn build_escpos_payload(text: &str) -> Vec<u8> {
             }
             if remaining.starts_with("<left>") {
                 data.extend_from_slice(b"\x1B\x61\x00"); // ESC a 0 left
-                in_left = true;
-                in_center = false;
-                in_right = false;
+                _in_left = true;
+                _in_center = false;
+                _in_right = false;
                 pos += 6;
                 continue;
             }
@@ -539,11 +539,10 @@ pub fn print_struk(
     }
     candidates.extend(default_candidates());
 
-    let mut last_err = String::from("Tidak ada printer yang dapat ditulis.");
     for dev in candidates {
         match try_write_device(&dev, &data) {
             Ok(()) => return Ok(format!("Cetak ke {dev} berhasil")),
-            Err(e) => last_err = e,
+            Err(_) => continue,
         }
     }
     // Pesan error ringkas — detail teknis disembunyikan agar tidak membingungkan kasir

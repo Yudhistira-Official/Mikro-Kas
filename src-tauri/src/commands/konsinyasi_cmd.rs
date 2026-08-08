@@ -59,6 +59,7 @@ pub struct KonsinyasiMasukInput {
     pub batas_waktu: Option<String>,
     #[serde(default)]
     pub items: Vec<KonsinyasiItemInput>,
+    #[allow(dead_code)]
     pub total_item: Option<i64>,
     pub catatan: Option<String>,
 }
@@ -75,6 +76,7 @@ pub struct KonsinyasiKeluarInput {
     pub jadwal_evaluasi: Option<String>,
     #[serde(default)]
     pub items: Vec<KonsinyasiItemInput>,
+    #[allow(dead_code)]
     pub total_item: Option<i64>,
     pub catatan: Option<String>,
 }
